@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase-server";
-import { hashPublicKey } from "@/lib/crypto-server";
 
 const Schema = z.object({
   publicKey: z.string().min(50).max(500),
+  publicKeyHash: z.string().length(64),
   encryptedVault: z.string().min(10),
   vaultIV: z.string().min(10),
 });
@@ -15,8 +15,7 @@ export async function POST(req: NextRequest) {
     const parsed = Schema.safeParse(await req.json());
     if (!parsed.success) return NextResponse.json({ error: "Invalid request" }, { status: 400 });
 
-    const { publicKey, encryptedVault, vaultIV } = parsed.data;
-    const publicKeyHash = hashPublicKey(publicKey);
+    const { publicKey, publicKeyHash, encryptedVault, vaultIV } = parsed.data;
 
     const { data: existing } = await supabaseAdmin
       .from("users")

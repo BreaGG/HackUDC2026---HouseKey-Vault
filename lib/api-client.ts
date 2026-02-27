@@ -1,3 +1,5 @@
+// lib/api-client.ts
+
 async function apiPost<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
@@ -11,14 +13,29 @@ async function apiPost<T>(url: string, body: unknown): Promise<T> {
 }
 
 export const api = {
-  register: (payload: { publicKey: string; encryptedVault: string; vaultIV: string }) =>
-    apiPost<{ userId: string }>("/api/auth/register", payload),
+  register: (payload: {
+    publicKey: string;
+    publicKeyHash: string;
+    encryptedVault: string;
+    vaultIV: string;
+  }) => apiPost<{ userId: string }>("/api/auth/register", payload),
 
   getChallenge: (publicKeyHash: string) =>
     apiPost<{ nonce: string }>("/api/auth/challenge", { publicKeyHash }),
 
-  verify: (payload: { publicKey: string; publicKeyHash: string; signature: string; nonce: string }) =>
-    apiPost<{ success: boolean; encryptedVault?: string; vaultIV?: string; error?: string; remaining?: number }>("/api/auth/verify", payload),
+  verify: (payload: {
+    publicKey: string;
+    publicKeyHash: string;
+    signature: string;
+    nonce: string;
+  }) => apiPost<{
+    success: boolean;
+    encryptedVault?: string;
+    vaultIV?: string;
+    error?: string;
+    remaining?: number;
+    failsLeft?: number;
+  }>("/api/auth/verify", payload),
 
   saveVault: (encryptedVault: string, vaultIV: string) =>
     apiPost<{ success: boolean }>("/api/vault/save", { encryptedVault, vaultIV }),
@@ -26,8 +43,14 @@ export const api = {
   logout: () => apiPost<{ success: boolean }>("/api/auth/logout", {}),
 
   async checkBreached(password: string): Promise<number> {
-    const hashBuf = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(password));
-    const hash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,"0")).join("").toUpperCase();
+    const hashBuf = await crypto.subtle.digest(
+      "SHA-1",
+      new TextEncoder().encode(password)
+    );
+    const hash = Array.from(new Uint8Array(hashBuf))
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("")
+      .toUpperCase();
     const prefix = hash.slice(0, 5);
     const suffix = hash.slice(5);
     const res = await fetch(`/api/hibp?prefix=${prefix}`);

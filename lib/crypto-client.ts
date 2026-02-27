@@ -1,6 +1,29 @@
 // lib/crypto-client.ts
 // All crypto runs in the BROWSER. Private key never leaves the client.
 
+// ─── HELPERS (defined first, used everywhere) ────────────────────────────────
+
+export function bufToB64(buf: ArrayBuffer): string {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+
+// Always returns a proper ArrayBuffer — fixes Web Crypto type errors
+export function b64ToBuf(b64: string): ArrayBuffer {
+  const binary = atob(b64);
+  const buf = new ArrayBuffer(binary.length);
+  const view = new Uint8Array(buf);
+  for (let i = 0; i < binary.length; i++) {
+    view[i] = binary.charCodeAt(i);
+  }
+  return buf;
+}
+
+export function bufToHex(buf: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 // ─── KEY GENERATION ──────────────────────────────────────────────────────────
 
 export async function generateKeyPair(): Promise<{
@@ -10,7 +33,7 @@ export async function generateKeyPair(): Promise<{
 }> {
   const keyPair = await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
-    true, // exportable so we can write to USB
+    true,
     ["sign", "verify"]
   );
 
@@ -50,21 +73,14 @@ export async function signChallenge(
 }
 
 // ─── VAULT ENCRYPTION (AES-256-GCM) ─────────────────────────────────────────
-// AES key is derived by SHA-256 hashing the full private key bytes.
-// This gives us deterministic 32-byte raw key material from any pkcs8 key.
-// Only the holder of the private key can ever decrypt the vault.
 
 export async function deriveVaultKey(privateKeyB64: string): Promise<CryptoKey> {
-  // Hash the full raw pkcs8 bytes to get deterministic 32-byte key material
   const privateKeyBytes = b64ToBuf(privateKeyB64);
   const hashBuffer = await crypto.subtle.digest("SHA-256", privateKeyBytes);
-
   return crypto.subtle.importKey(
-    "raw",
-    hashBuffer,
+    "raw", hashBuffer,
     { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
+    false, ["encrypt", "decrypt"]
   );
 }
 
@@ -74,17 +90,14 @@ export async function encryptVault(
 ): Promise<{ encryptedVault: string; vaultIV: string }> {
   const aesKey = await deriveVaultKey(privateKeyB64);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = new TextEncoder().encode(JSON.stringify(data));
-
   const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     aesKey,
-    plaintext
+    new TextEncoder().encode(JSON.stringify(data))
   );
-
   return {
     encryptedVault: bufToB64(ciphertext),
-    vaultIV: bufToB64(iv),
+    vaultIV: bufToB64(iv.buffer as ArrayBuffer),
   };
 }
 
@@ -94,24 +107,22 @@ export async function decryptVault(
   privateKeyB64: string
 ): Promise<VaultData> {
   const aesKey = await deriveVaultKey(privateKeyB64);
-
   const plaintext = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: b64ToBuf(vaultIV) },
     aesKey,
     b64ToBuf(encryptedVault)
   );
-
   return JSON.parse(new TextDecoder().decode(plaintext)) as VaultData;
 }
 
-// ─── PUBLIC KEY HASHING (for DB lookup without exposing key directly) ─────────
+// ─── PUBLIC KEY HASHING ──────────────────────────────────────────────────────
 
 export async function hashPublicKey(publicKeyB64: string): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", b64ToBuf(publicKeyB64));
   return bufToHex(hash);
 }
 
-// ─── SEED PHRASE (BIP-39 inspired, 12 words from 128-bit entropy) ────────────
+// ─── SEED PHRASE ─────────────────────────────────────────────────────────────
 
 const WORD_LIST = [
   "abandon","ability","able","about","above","absent","absorb","abstract","absurd","abuse",
@@ -138,25 +149,12 @@ const WORD_LIST = [
 
 export function generateSeedPhrase(): string {
   const indices = crypto.getRandomValues(new Uint32Array(12));
-  return Array.from(indices)
-    .map((n) => WORD_LIST[n % WORD_LIST.length])
-    .join(" ");
+  return Array.from(indices).map(n => WORD_LIST[n % WORD_LIST.length]).join(" ");
 }
 
-export function seedPhraseToEntropy(phrase: string): Uint8Array {
-  // Deterministically encode seed phrase as entropy for key recovery
-  const words = phrase.trim().toLowerCase().split(/\s+/);
-  const encoder = new TextEncoder();
-  return encoder.encode(words.join("-"));
-}
+// ─── PASSWORD UTILITIES ──────────────────────────────────────────────────────
 
-// ─── PASSWORD STRENGTH ───────────────────────────────────────────────────────
-
-export function scorePassword(password: string): {
-  score: number; // 0-4
-  label: string;
-  color: string;
-} {
+export function scorePassword(password: string): { score: number; label: string; color: string } {
   if (!password) return { score: 0, label: "", color: "var(--border)" };
   let score = 0;
   if (password.length >= 12) score++;
@@ -170,65 +168,34 @@ export function scorePassword(password: string): {
   return { score, label: labels[score], color: colors[score] };
 }
 
-export function generatePassword(options: {
-  length?: number;
-  symbols?: boolean;
-  numbers?: boolean;
-  uppercase?: boolean;
+export function generatePassword(opts: {
+  length?: number; symbols?: boolean; numbers?: boolean; uppercase?: boolean;
 } = {}): string {
-  const { length = 20, symbols = true, numbers = true, uppercase = true } = options;
+  const { length = 20, symbols = true, numbers = true, uppercase = true } = opts;
   let chars = "abcdefghijklmnopqrstuvwxyz";
   if (uppercase) chars += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  if (numbers) chars += "0123456789";
-  if (symbols) chars += "!@#$%^&*-_+=";
-
-  const bytes = crypto.getRandomValues(new Uint8Array(length * 2));
+  if (numbers)   chars += "0123456789";
+  if (symbols)   chars += "!@#$%^&*-_+=";
+  const bytes = crypto.getRandomValues(new Uint8Array(length * 3));
   let result = "";
   for (let i = 0; i < bytes.length && result.length < length; i++) {
-    if (bytes[i] < Math.floor(256 / chars.length) * chars.length) {
+    if (bytes[i] < Math.floor(256 / chars.length) * chars.length)
       result += chars[bytes[i] % chars.length];
-    }
   }
-  // Ensure at least one of each required type
-  return result.padEnd(length, generatePassword({ ...options, length: length - result.length }));
+  return result.slice(0, length).padEnd(length, chars[0]);
 }
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-
-export function bufToB64(buf: ArrayBuffer | Uint8Array): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer)));
-}
-
-export function b64ToBuf(b64: string): Uint8Array {
-  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-}
-
-export function bufToHex(buf: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+export function emptyVault(): VaultData {
+  return { entries: [], createdAt: Date.now(), version: 1 };
 }
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
 export interface VaultEntry {
-  id: string;
-  site: string;
-  username: string;
-  password: string;
-  url?: string;
-  notes?: string;
-  createdAt: number;
-  updatedAt: number;
-  breached?: boolean;
+  id: string; site: string; username: string; password: string;
+  url?: string; notes?: string; createdAt: number; updatedAt: number; breached?: boolean;
 }
 
 export interface VaultData {
-  entries: VaultEntry[];
-  createdAt: number;
-  version: number;
-}
-
-export function emptyVault(): VaultData {
-  return { entries: [], createdAt: Date.now(), version: 1 };
+  entries: VaultEntry[]; createdAt: number; version: number;
 }

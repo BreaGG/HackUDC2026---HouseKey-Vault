@@ -1197,7 +1197,7 @@ function CreateScreen({ onBack, onComplete }: { onBack: () => void; onComplete: 
       const keyFile: KeyFile = { privateKeyB64, publicKeyB64, publicKeyHash, createdAt: Date.now(), version: 1 };
       await setupUSBKey(keyFile);
       setStatus("Registering public key with server");
-      await api.register({ publicKey: publicKeyB64, encryptedVault, vaultIV });
+      await api.register({ publicKey: publicKeyB64, publicKeyHash, encryptedVault, vaultIV });
       setSeedPhrase(generateSeedPhrase());
       sessionRef.current = { privateKeyB64, publicKeyB64, publicKeyHash, vault };
       setStep(2);
