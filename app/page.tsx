@@ -7,7 +7,7 @@ import {
   generateSeedPhrase, generatePassword, scorePassword, emptyVault,
   type VaultData, type VaultEntry,
 } from "@/lib/crypto-client";
-import { setupUSBKey, loadUSBKey, isFileSystemAccessSupported } from "@/lib/usb-storage";
+import { setupUSBKey, loadUSBKey, detectTier, type StorageTier } from "@/lib/usb-storage";
 import { api } from "@/lib/api-client";
 
 type Screen = "landing"|"create"|"login"|"recover"|"vault"|"paranoia";
@@ -921,23 +921,76 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
 
 // ── LANDING ───────────────────────────────────────────────────────────────────
 function LandingScreen({ onCreate, onLogin, onRecover }:{ onCreate:()=>void; onLogin:()=>void; onRecover:()=>void }) {
-  const supported=isFileSystemAccessSupported();
+  const tier = detectTier();
+  const tierLabel = tier==="directory"?"USB / folder key":tier==="file"?"File key (.hkv)":"Download key file";
+  const tierHint  = tier==="directory"?"Chrome · Edge · Desktop":"Works on all browsers & mobile";
   return (
     <div className="screen"><Wordmark/>
       <div className="card">
         <div className="eyebrow">Secure Credential Storage</div>
         <div className="h1">Your key.<br/>Your vault.</div>
-        <div className="body">Authentication via cryptographic key pair on your USB device. No master password. The private key never leaves your hardware.</div>
-        {!supported&&<div className="alert alert-warn"><I.Alert/>Requires Chrome or Edge 86+.</div>}
+        <div className="body">Your private key lives in a file you control — USB, phone storage, iCloud, anywhere. No master password. The key never leaves your device.</div>
         <div className="sec-bar">{["ECDSA P-256","AES-256-GCM","Zero-Knowledge","HIBP k-Anon"].map(l=><div key={l} className="sec-item"><I.Shield/>{l}</div>)}</div>
+        <div style={{background:"var(--ink3)",border:"1px solid var(--line)",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:14,display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:"var(--jade)",flexShrink:0}}/>
+          <div>
+            <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text)"}}>{tierLabel}</div>
+            <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text3)"}}>{tierHint}</div>
+          </div>
+        </div>
         <div className="btn-row">
-          <button className="btn btn-primary" onClick={onCreate} disabled={!supported}><I.Plus/>New Vault</button>
-          <button className="btn btn-outline" onClick={onLogin} disabled={!supported} style={{marginTop:0}}><I.Unlock/>Unlock Vault</button>
+          <button className="btn btn-primary" onClick={onCreate}><I.Plus/>New Vault</button>
+          <button className="btn btn-outline" onClick={onLogin} style={{marginTop:0}}><I.Unlock/>Unlock Vault</button>
         </div>
         <div style={{display:"flex",justifyContent:"center"}}>
-          <button className="recovery-link" onClick={onRecover} disabled={!supported}><I.Recover/>Lost your USB? Recover with seed phrase</button>
+          <button className="recovery-link" onClick={onRecover}><I.Recover/>Lost your key? Recover with seed phrase</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── CROSS-BROWSER KEY ZONE COMPONENTS ───────────────────────────────────────
+
+function KeyZoneButton({ onClick }:{ onClick:()=>void }) {
+  const tier = detectTier();
+  const labels = {
+    directory: { main:"Select folder",        hint:"Picks a USB or any folder · Chrome/Edge" },
+    file:      { main:"Save key file",         hint:"You'll choose where to save the .hkv file" },
+    download:  { main:"Download key file",     hint:"Save it to USB, iCloud, Google Drive…" },
+  };
+  const { main, hint } = labels[tier];
+  return (
+    <div className="usb-zone" onClick={onClick}>
+      <div className="usb-visual">
+        {tier==="directory" ? <I.USB/> : <I.Key/>}
+      </div>
+      <div className="usb-label">{main}</div>
+      <div className="usb-hint">{hint}</div>
+    </div>
+  );
+}
+
+function LoginKeyZone({ status, msg, onLogin }:{ status:string; msg:string; onLogin:()=>void }) {
+  const tier = detectTier();
+  const idle = status !== "loading";
+  const labels = {
+    directory: "Select folder with your .hkv file",
+    file:      "Select your .hkv key file",
+    download:  "Open your .hkv key file",
+  };
+  const hints = {
+    directory: "ECDSA P-256 · Chrome/Edge",
+    file:      "ECDSA P-256 · all browsers",
+    download:  "ECDSA P-256 · all browsers",
+  };
+  return (
+    <div className={`usb-zone ${!idle?"active":""}`} onClick={idle?onLogin:undefined}>
+      <div className="usb-visual">
+        {!idle ? <I.Lock/> : <I.Key/>}
+      </div>
+      <div className="usb-label">{!idle ? msg : labels[tier]}</div>
+      <div className="usb-hint">{idle ? hints[tier] : ""}</div>
     </div>
   );
 }
@@ -954,7 +1007,8 @@ function CreateScreen({ onBack, onComplete }:{ onBack:()=>void; onComplete:(s:Se
       setStatus("Deriving AES-256 vault key");
       const vault=emptyVault();const {encryptedVault,vaultIV}=await encryptVault(vault,privateKeyB64);
       setStatus("Writing key to USB");
-      await setupUSBKey({privateKeyB64,publicKeyB64,publicKeyHash,createdAt:Date.now(),version:1});
+      const keyTier = await setupUSBKey({privateKeyB64,publicKeyB64,publicKeyHash,createdAt:Date.now(),version:1});
+      if(keyTier==="download") setStatus("Key downloaded — save it somewhere safe");
       setStatus("Registering with server");
       const seedPhrase = generateSeedPhrase();
       // Also encrypt vault with seed-derived key so recovery works without USB
@@ -975,7 +1029,7 @@ function CreateScreen({ onBack, onComplete }:{ onBack:()=>void; onComplete:(s:Se
         {error&&<div className="alert alert-warn"><I.Alert/>{error}</div>}
         {step===0&&<><div className="eyebrow">Step 1 of 3</div><div className="h1">Initialize USB key</div>
           <div className="body">Select your USB directory. A <code style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--gold)"}}>housekeyvault.hkv</code> key file will be written.</div>
-          <div className="usb-zone" onClick={setup}><div className="usb-visual"><I.USB/></div><div className="usb-label">Select USB directory</div><div className="usb-hint">Browser will prompt for folder access</div></div>
+          <KeyZoneButton onClick={setup}/>
           <button className="btn btn-ghost" onClick={onBack}>Back</button>
         </>}
         {step===1&&<><div className="eyebrow">Initializing</div><div className="h1">Setting up vault</div>
@@ -983,7 +1037,7 @@ function CreateScreen({ onBack, onComplete }:{ onBack:()=>void; onComplete:(s:Se
           <div className="usb-zone active"><div className="usb-visual"><I.USB/></div><div className="usb-label">Writing to device</div><div className="usb-hint">Do not remove USB</div></div>
         </>}
         {step===2&&<><div className="eyebrow">Step 2 of 3</div><div className="h1">Recovery phrase</div>
-          <div className="body">Store offline. Only way to recover if USB is lost.</div>
+          <div className="body">Store offline. Only way to recover if your key file is lost.</div>
           <div className="alert alert-warn"><I.Alert/>Will not be shown again.</div>
           <div className="seed-box">
             <div className="seed-hdr"><div className="seed-label">12-Word Recovery Phrase</div>
@@ -1025,11 +1079,7 @@ function LoginScreen({ onBack, onSuccess, onParanoia }:{ onBack:()=>void; onSucc
         <div className="eyebrow">Authentication</div><div className="h1">Insert key to unlock</div>
         <div className="body">Select the directory with your <code style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--gold)"}}>housekeyvault.hkv</code> file.</div>
         {status==="error"&&<div className="alert alert-warn"><I.Alert/>{msg}</div>}
-        <div className={`usb-zone ${status==="loading"?"active":""}`} onClick={status!=="loading"?login:undefined}>
-          <div className="usb-visual">{status==="loading"?<I.Lock/>:<I.Key/>}</div>
-          <div className="usb-label">{status==="loading"?msg:"Click to authenticate"}</div>
-          <div className="usb-hint">{status==="idle"?"ECDSA P-256 challenge-response":""}</div>
-        </div>
+        <LoginKeyZone status={status} msg={msg} onLogin={login}/>
         <button className="btn btn-ghost" onClick={onBack}>Back</button>
       </div>
     </div>

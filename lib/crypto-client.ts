@@ -207,14 +207,17 @@ export interface VaultData {
 
 export async function deriveVaultKeyFromSeed(seedPhrase: string): Promise<CryptoKey> {
   const enc = new TextEncoder();
+  // Slice to plain ArrayBuffer — WebCrypto rejects Uint8Array<ArrayBufferLike>
+  const toPlain = (u: Uint8Array): ArrayBuffer =>
+    u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
   const baseKey = await crypto.subtle.importKey(
-    "raw", enc.encode(seedPhrase.trim().toLowerCase()),
+    "raw", toPlain(enc.encode(seedPhrase.trim().toLowerCase())),
     { name: "PBKDF2" }, false, ["deriveKey"]
   );
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: enc.encode("housekeyvault-recovery-v1"), // static salt — seed entropy is high enough
+      salt: toPlain(enc.encode("housekeyvault-recovery-v1")),
       iterations: 200_000,
       hash: "SHA-256",
     },
@@ -230,7 +233,8 @@ export async function encryptVaultWithSeed(
   seedPhrase: string
 ): Promise<{ encryptedVault: string; vaultIV: string }> {
   const aesKey = await deriveVaultKeyFromSeed(seedPhrase);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ivRaw = crypto.getRandomValues(new Uint8Array(12));
+  const iv = ivRaw.buffer.slice(0, 12) as ArrayBuffer;
   const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     aesKey,
@@ -238,7 +242,7 @@ export async function encryptVaultWithSeed(
   );
   return {
     encryptedVault: bufToB64(ciphertext),
-    vaultIV: bufToB64(iv.buffer as ArrayBuffer),
+    vaultIV: bufToB64(iv),
   };
 }
 
