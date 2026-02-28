@@ -156,6 +156,19 @@ create table lockouts (
   locked_until timestamptz,
   last_attempt timestamptz
 );
+
+create table shares (
+  id             text primary key default gen_random_uuid()::text,
+  ciphertext     text not null,
+  iv             text not null,
+  sender_pub_key text not null,
+  expires_at     timestamptz not null,
+  used           boolean default false,
+  created_by     text references users(id) on delete cascade,
+  created_at     timestamptz default now()
+);
+
+create index shares_expires_idx on shares (expires_at);
 ```
 
 ---

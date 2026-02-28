@@ -10,6 +10,7 @@ import {
 import { setupUSBKey, loadUSBKey, detectTier, type StorageTier } from "@/lib/usb-storage";
 import { api } from "@/lib/api-client";
 import { importAuto, exportBitwardenCSV, exportBitwardenJSON, exportNativeJSON, pickImportFile, type ImportResult } from "@/lib/import-export";
+import { createShare, type SharePayload } from "@/lib/share-crypto";
 
 type Screen = "landing"|"create"|"login"|"recover"|"vault"|"paranoia";
 interface SessionState { privateKeyB64:string; publicKeyB64:string; publicKeyHash:string; vault:VaultData; }
@@ -384,6 +385,15 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .import-result-sub{font-family:var(--mono);font-size:10px;color:var(--text3)}
 .import-btn-row{display:flex;gap:8px}
 .import-btn-row .btn{flex:1;padding:10px 14px;font-size:11px}
+/* SHARE MODAL */
+.share-link-box{background:var(--ink);border:1px solid rgba(201,168,76,.3);border-radius:var(--r);padding:10px 12px;margin:10px 0;word-break:break-all;font-family:var(--mono);font-size:10px;color:var(--gold2);line-height:1.6;position:relative}
+.share-link-copy{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:4px;border:1px solid var(--line2);background:var(--ink2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;color:var(--text3)}
+.share-link-copy:hover{border-color:var(--gold);color:var(--gold)}
+.share-link-copy.ok{border-color:var(--jade);color:var(--jade)}
+.share-link-copy svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:1.5}
+.ttl-chips{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
+.ttl-chip{padding:4px 10px;border:1px solid var(--line);border-radius:3px;background:transparent;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--text3);cursor:pointer;transition:all .15s;text-transform:uppercase}
+.ttl-chip.on{background:var(--gold-dim);border-color:rgba(201,168,76,.4);color:var(--gold)}
 /* topbar import/export button */
 .io-btn{padding:5px 12px;background:transparent;border:1px solid var(--line2);border-radius:var(--r);color:var(--text3);font-family:var(--sans);font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:5px;line-height:1;height:30px;white-space:nowrap}
 .io-btn svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;flex-shrink:0}
@@ -424,6 +434,8 @@ const I = {
   Edit:      ()=><svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
   Recover:   ()=><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>,
   OTP:       ()=><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/><path d="M9 7h6M9 11h4"/></svg>,
+  Share:     ()=><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>,
+  Link:      ()=><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
   GripV:     ()=><svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1" fill="currentColor" stroke="none"/></svg>,
   Upload:    ()=><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
   Download:  ()=><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
@@ -748,10 +760,10 @@ function HealthWidget({ entries, onCheckAll }:{ entries:VaultEntry[]; onCheckAll
 }
 
 // ── ENTRY LIST with drag-to-reorder + inline edit ────────────────────────────
-function EntryList({ entries, folders, onCopy, onDelete, onEdit, onCheckBreach, checking }:{
+function EntryList({ entries, folders, onCopy, onDelete, onEdit, onCheckBreach, onShare, checking }:{
   entries:VaultEntry[]; folders:Folder[]; onCopy:(t:string,l:string)=>void;
   onDelete:(id:string)=>void; onEdit:(id:string,d:EntryFormData)=>void;
-  onCheckBreach:(e:VaultEntry)=>void; checking:Record<string,boolean>;
+  onCheckBreach:(e:VaultEntry)=>void; onShare:(e:VaultEntry)=>void; checking:Record<string,boolean>;
 }) {
   const [vis,setVis]=useState<Record<string,boolean>>({});
   const [editingId,setEditingId]=useState<string|null>(null);
@@ -830,12 +842,128 @@ function EntryList({ entries, folders, onCopy, onDelete, onEdit, onCheckBreach, 
                 {vis[e.id]?<I.EyeOff/>:<I.Eye/>}
               </button>
               <button className={`icon-btn ${editingId===e.id?"editing":""}`} onClick={()=>setEditingId(id=>id===e.id?null:e.id)} title="Edit entry"><I.Edit/></button>
+              <button className="icon-btn" onClick={()=>onShare(e)} title="Share via secure link"><I.Share/></button>
               <button className="icon-btn" disabled={checking[e.id]} style={{opacity:checking[e.id]?.3:1}} onClick={()=>onCheckBreach(e)} title="Check breach"><I.Shield/></button>
               <button className="icon-btn danger" onClick={()=>onDelete(e.id)} title="Delete"><I.Trash/></button>
             </div>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── SHARE MODAL ───────────────────────────────────────────────────────────────
+const TTL_OPTIONS = [
+  { label: "1 hour",  seconds: 3600 },
+  { label: "24 hours", seconds: 86400 },
+  { label: "7 days",  seconds: 604800 },
+];
+
+function ShareModal({ entry, onClose, onToast }:{
+  entry: VaultEntry; onClose: ()=>void; onToast: (m:string,t?:"ok"|"warn")=>void;
+}) {
+  const [ttl, setTtl]         = useState(86400);
+  const [state, setState]     = useState<"idle"|"generating"|"done"|"error">("idle");
+  const [shareUrl, setShareUrl] = useState("");
+  const [copied, setCopied]   = useState(false);
+
+  const generate = async () => {
+    setState("generating");
+    try {
+      const payload: SharePayload = {
+        site:        entry.site,
+        username:    entry.username,
+        password:    entry.password,
+        notes:       (entry as any).notes || undefined,
+        totpSecret:  (entry as any).totpSecret || undefined,
+      };
+      const { apiPayload, fragment } = await createShare(payload);
+
+      const res = await fetch("/api/share", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...apiPayload, ttlSeconds: ttl }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to create share.");
+
+      const base = `${window.location.origin}/share/${data.id}`;
+      setShareUrl(`${base}#${fragment}`);
+      setState("done");
+    } catch (e: any) {
+      onToast(e.message ?? "Share failed", "warn");
+      setState("error");
+    }
+  };
+
+  const copyLink = async () => {
+    await navigator.clipboard.writeText(shareUrl);
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+    onToast("Link copied", "ok");
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="modal" style={{maxWidth:440}}>
+        <div className="modal-header">
+          <div className="modal-title" style={{display:"flex",alignItems:"center",gap:8}}><I.Share/>Share credential</div>
+          <button className="modal-close" onClick={onClose}><I.X/></button>
+        </div>
+        <div className="modal-body">
+          {/* Entry preview */}
+          <div style={{display:"flex",alignItems:"center",gap:10,background:"var(--ink3)",border:"1px solid var(--line)",borderRadius:"var(--r)",padding:"10px 12px",marginBottom:16}}>
+            <SiteAvatar site={entry.site}/>
+            <div>
+              <div style={{fontSize:13,fontWeight:500,color:"var(--text)"}}>{entry.site}</div>
+              <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text3)"}}>{entry.username}</div>
+            </div>
+          </div>
+
+          {state !== "done" && (<>
+            <div className="nav-label" style={{marginBottom:8}}>Link expires after</div>
+            <div className="ttl-chips">
+              {TTL_OPTIONS.map(o=>(
+                <button key={o.seconds} className={`ttl-chip ${ttl===o.seconds?"on":""}`} onClick={()=>setTtl(o.seconds)}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="alert alert-warn" style={{marginBottom:16}}>
+              <I.Alert/>
+              <span>One-time use. The link is invalidated the moment the recipient opens it. The server never sees the password — decryption happens entirely in the recipient&apos;s browser.</span>
+            </div>
+
+            <button className="btn btn-primary" onClick={generate} disabled={state==="generating"}
+              style={{padding:"8px 16px",width:"auto",fontSize:11,height:"auto"}}>
+              {state==="generating"
+                ? <><span style={{display:"inline-block",animation:"spin 1s linear infinite",marginRight:6}}>⟳</span>Generating…</>
+                : <><I.Link/>Generate secure link</>}
+            </button>
+          </>)}
+
+          {state === "done" && (<>
+            <div className="alert alert-ok" style={{marginBottom:12}}>
+              <I.Check/>Link ready — share it now. It will expire after one use.
+            </div>
+            <div className="nav-label" style={{marginBottom:6}}>Secure link</div>
+            <div className="share-link-box">
+              {shareUrl.slice(0, 60)}…
+              <button className={`share-link-copy ${copied?"ok":""}`} onClick={copyLink}>
+                {copied ? <I.Check/> : <I.Copy/>}
+              </button>
+            </div>
+            <button className="btn btn-primary" onClick={copyLink}
+              style={{padding:"8px 16px",width:"auto",fontSize:11,height:"auto",marginTop:8}}>
+              {copied ? <><I.Check/>Copied!</> : <><I.Copy/>Copy full link</>}
+            </button>
+            <div style={{marginTop:14,fontFamily:"var(--mono)",fontSize:9,color:"var(--text3)",lineHeight:1.7}}>
+              The decryption key is embedded in the URL fragment. Do not share via email — use a secure channel.
+            </div>
+          </>)}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1016,6 +1144,7 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
   const [checking,setChecking]=useState<Record<string,boolean>>({});
   const [toast,setToast]=useState<{msg:string;type:"default"|"ok"|"warn"}|null>(null);
   const [showIO,setShowIO]=useState(false);
+  const [sharingEntry,setSharingEntry]=useState<VaultEntry|null>(null);
 
   const showToast=(msg:string,type:"default"|"ok"|"warn"="default")=>{setToast({msg,type});setTimeout(()=>setToast(null),2800);};
 
@@ -1132,11 +1261,12 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
             </div>
             {showAdd&&<EntryForm mode="add" folders={folders} onSave={handleSave} onCancel={()=>setShowAdd(false)} onToast={showToast}/>}
             <EntryList entries={filtered} folders={folders} onCopy={copy} onDelete={handleDelete}
-              onEdit={handleEdit} onCheckBreach={checkBreach} checking={checking}/>
+              onEdit={handleEdit} onCheckBreach={checkBreach} onShare={setSharingEntry} checking={checking}/>
           </div>
         </div>
       </div>
       {toast&&<Toast msg={toast.msg} type={toast.type}/>}
+      {sharingEntry&&<ShareModal entry={sharingEntry} onClose={()=>setSharingEntry(null)} onToast={showToast}/>}
       {showIO&&<ImportExportModal entries={vault.entries} onImport={handleImport} onClose={()=>setShowIO(false)}/>}
     </div>
   );
