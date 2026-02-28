@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import {
   generateKeyPair, signChallenge, encryptVault, decryptVault,
+  encryptVaultWithSeed, decryptVaultWithSeed,
   generateSeedPhrase, generatePassword, scorePassword, emptyVault,
   type VaultData, type VaultEntry,
 } from "@/lib/crypto-client";
@@ -32,12 +33,14 @@ function base32Decode(s: string): Uint8Array {
 }
 
 async function generateTOTP(secret: string, digits = 6, period = 30): Promise<string> {
-  const key = base32Decode(secret);
+  const keyBytes = base32Decode(secret);
+  // Copy to a plain ArrayBuffer — WebCrypto rejects Uint8Array<ArrayBufferLike>
+  const keyBuf = keyBytes.buffer.slice(keyBytes.byteOffset, keyBytes.byteOffset + keyBytes.byteLength) as ArrayBuffer;
   const counter = Math.floor(Date.now() / 1000 / period);
   const buf = new ArrayBuffer(8);
   const view = new DataView(buf);
   view.setUint32(4, counter, false);
-  const cryptoKey = await crypto.subtle.importKey("raw", key, { name:"HMAC", hash:"SHA-1" }, false, ["sign"]);
+  const cryptoKey = await crypto.subtle.importKey("raw", keyBuf, { name:"HMAC", hash:"SHA-1" }, false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", cryptoKey, buf);
   const arr = new Uint8Array(sig);
   const offset = arr[19] & 0xf;
@@ -953,8 +956,14 @@ function CreateScreen({ onBack, onComplete }:{ onBack:()=>void; onComplete:(s:Se
       setStatus("Writing key to USB");
       await setupUSBKey({privateKeyB64,publicKeyB64,publicKeyHash,createdAt:Date.now(),version:1});
       setStatus("Registering with server");
-      await api.register({publicKey:publicKeyB64,publicKeyHash,encryptedVault,vaultIV});
-      setSeed(generateSeedPhrase());ref.current={privateKeyB64,publicKeyB64,publicKeyHash,vault};setStep(2);
+      const seedPhrase = generateSeedPhrase();
+      // Also encrypt vault with seed-derived key so recovery works without USB
+      const {encryptedVault:seedEnc,vaultIV:seedIV} = await encryptVaultWithSeed(vault, seedPhrase);
+      // Hash the seed so server can look it up without storing plaintext
+      const seedHashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seedPhrase.trim().toLowerCase()));
+      const seedHash = Array.from(new Uint8Array(seedHashBuf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+      await api.register({publicKey:publicKeyB64,publicKeyHash,encryptedVault,vaultIV,seedHash,seedEncryptedVault:seedEnc,seedVaultIV:seedIV});
+      setSeed(seedPhrase);ref.current={privateKeyB64,publicKeyB64,publicKeyHash,vault};setStep(2);
     }catch(e:any){setError(e.message??"Setup failed.");setStep(0);}
   };
   const copySeed=async()=>{await navigator.clipboard.writeText(seed);setCopied(true);setTimeout(()=>setCopied(false),3000);};
@@ -1043,7 +1052,8 @@ function RecoverScreen({ onBack, onSuccess }:{ onBack:()=>void; onSuccess:(s:Ses
       const seed=words.join(" ");const result=await api.recover(seed);
       if(!result.success||!result.encryptedVault)throw new Error(result.error??"Recovery failed.");
       const {publicKeyB64,privateKeyB64,publicKeyHash}=await generateKeyPair();
-      const vault=await decryptVault(result.encryptedVault,result.vaultIV!,result.recoveryKey!);
+      // Decrypt with seed-derived key (PBKDF2 → AES-256-GCM)
+      const vault=await decryptVaultWithSeed(result.encryptedVault,result.vaultIV!,result.recoveryKey!);
       const {encryptedVault:newEnc,vaultIV:newIV}=await encryptVault(vault,privateKeyB64);
       await api.saveVault(newEnc,newIV);
       await setupUSBKey({privateKeyB64,publicKeyB64,publicKeyHash,createdAt:Date.now(),version:1});

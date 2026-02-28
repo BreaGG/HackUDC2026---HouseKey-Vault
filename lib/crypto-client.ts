@@ -199,3 +199,59 @@ export interface VaultEntry {
 export interface VaultData {
   entries: VaultEntry[]; createdAt: number; version: number;
 }
+
+// ─── SEED-BASED VAULT KEY (for recovery) ─────────────────────────────────────
+// At registration we encrypt a *copy* of the vault with a key derived from the
+// seed phrase (PBKDF2 → AES-256-GCM). This copy is what /api/auth/recover returns.
+// The client decrypts it with the seed, then re-encrypts with the new private key.
+
+export async function deriveVaultKeyFromSeed(seedPhrase: string): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey(
+    "raw", enc.encode(seedPhrase.trim().toLowerCase()),
+    { name: "PBKDF2" }, false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: enc.encode("housekeyvault-recovery-v1"), // static salt — seed entropy is high enough
+      iterations: 200_000,
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+export async function encryptVaultWithSeed(
+  data: VaultData,
+  seedPhrase: string
+): Promise<{ encryptedVault: string; vaultIV: string }> {
+  const aesKey = await deriveVaultKeyFromSeed(seedPhrase);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    aesKey,
+    new TextEncoder().encode(JSON.stringify(data))
+  );
+  return {
+    encryptedVault: bufToB64(ciphertext),
+    vaultIV: bufToB64(iv.buffer as ArrayBuffer),
+  };
+}
+
+export async function decryptVaultWithSeed(
+  encryptedVault: string,
+  vaultIV: string,
+  seedPhrase: string
+): Promise<VaultData> {
+  const aesKey = await deriveVaultKeyFromSeed(seedPhrase);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: b64ToBuf(vaultIV) },
+    aesKey,
+    b64ToBuf(encryptedVault)
+  );
+  return JSON.parse(new TextDecoder().decode(plaintext)) as VaultData;
+}

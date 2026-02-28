@@ -18,6 +18,9 @@ export const api = {
     publicKeyHash: string;
     encryptedVault: string;
     vaultIV: string;
+    seedHash: string;
+    seedEncryptedVault: string;
+    seedVaultIV: string;
   }) => apiPost<{ userId: string }>("/api/auth/register", payload),
 
   getChallenge: (publicKeyHash: string) =>
@@ -41,6 +44,15 @@ export const api = {
     apiPost<{ success: boolean }>("/api/vault/save", { encryptedVault, vaultIV }),
 
   logout: () => apiPost<{ success: boolean }>("/api/auth/logout", {}),
+
+  recover: (seedPhrase: string) =>
+    apiPost<{
+      success: boolean;
+      encryptedVault?: string;
+      vaultIV?: string;
+      recoveryKey?: string;
+      error?: string;
+    }>("/api/auth/recover", { seedPhrase }),
 
   async checkBreached(password: string): Promise<number> {
     const hashBuf = await crypto.subtle.digest(
