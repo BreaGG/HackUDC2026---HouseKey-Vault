@@ -8,6 +8,7 @@ export interface SharePayload {
   site:        string;
   username:    string;
   password:    string;
+  url?:        string;
   notes?:      string;
   totpSecret?: string;
 }

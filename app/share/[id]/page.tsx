@@ -91,7 +91,7 @@ function TOTPChip({ secret }: { secret: string }) {
 
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 
-interface Cred { site: string; username: string; password: string; notes?: string; totpSecret?: string; }
+interface Cred { site: string; username: string; password: string; url?: string; notes?: string; totpSecret?: string; }
 type State = "loading" | "decrypting" | "ready" | "error";
 
 export default function SharePage({ params }: { params: Promise<{ id: string }> }) {
@@ -216,8 +216,25 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
           {/* Ready */}
           {state === "ready" && cred && (<>
             <div className="eyebrow">Shared credential</div>
-            <div className="h1">{cred.site}</div>
-
+            {cred.url ? (
+              <a
+                href={cred.url.startsWith("http") ? cred.url : `https://${cred.url}`}
+                target="_blank" rel="noopener noreferrer"
+                className="h1"
+                style={{ display:"inline-flex", alignItems:"center", gap:8, color:"inherit", textDecoration:"none", borderBottom:"1px solid rgba(201,168,76,.3)", paddingBottom:2, marginBottom:18, transition:"border-color .2s" }}
+                onMouseEnter={e=>(e.currentTarget.style.borderColor="rgba(201,168,76,.8)")}
+                onMouseLeave={e=>(e.currentTarget.style.borderColor="rgba(201,168,76,.3)")}
+              >
+                {cred.site}
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#C9A84C" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0,opacity:.7}}>
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                  <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+              </a>
+            ) : (
+              <div className="h1">{cred.site}</div>
+            )}
+            <br />
             <div className="one-time-badge">
               <AlertSVG />
               One-time link — already consumed

@@ -875,6 +875,7 @@ function ShareModal({ entry, onClose, onToast }:{
         site:        entry.site,
         username:    entry.username,
         password:    entry.password,
+        url:         (entry as any).url || undefined,
         notes:       (entry as any).notes || undefined,
         totpSecret:  (entry as any).totpSecret || undefined,
       };
