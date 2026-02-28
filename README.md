@@ -40,6 +40,22 @@ Passwords are checked against the Have I Been Pwned database using k-Anonymity: 
 
 TOTP codes are generated client-side using a pure Web Crypto implementation of RFC 6238 (HMAC-SHA-1). The TOTP secret is stored encrypted inside the vault blob, never transmitted in plaintext. Codes are displayed inline on each entry with a live countdown ring.
 
+### Secure Credential Sharing
+
+Individual credentials can be shared via a one-time link using ephemeral ECDH key exchange. When a share is created, two ephemeral P-256 key pairs are generated in the browser. A shared AES-256-GCM key is derived from the ECDH exchange and used to encrypt the credential. The server stores only the ciphertext and the sender's ephemeral public key. The recipient's ephemeral private key is embedded in the URL fragment (`#key=…`), which the browser never includes in HTTP requests — making the decryption key invisible to the server at all times.
+
+On first access, the server marks the share as used and returns the ciphertext. The recipient's browser derives the same AES key from the ECDH exchange and decrypts locally. A second access returns HTTP 410. The server cannot decrypt the share even if the database is fully compromised.
+
+### Second Device Lock
+
+High-sensitivity entries (bank accounts, crypto wallets) can be protected with a second factor that requires a physically separate device. When enabled, a random 32-byte salt and a random 32-byte `deviceSecret` are generated in the browser. Both the `.hkv2` key file and an emergency passphrase derive the **same** AES-256-GCM key via PBKDF2(secret, salt, 200,000, SHA-256) — so the user has two independent paths to decrypt without any server involvement.
+
+The `.hkv2` file is saved to a location the user controls (using the same 3-tier browser storage system as the main `.hkv` file). The salt is stored in the vault entry. The emergency passphrase is never stored anywhere. To view or copy a second-device-protected password, the user must either select the `.hkv2` file from the second device or type the emergency passphrase — neither path touches the server.
+
+### Import / Export
+
+The vault supports importing credentials from Bitwarden CSV, Bitwarden JSON, 1Password CSV, and LastPass CSV. The format is detected automatically from the file headers. Exports are available as Bitwarden JSON (recommended, compatible with most managers), Bitwarden CSV (universal), or HouseKey native JSON (full fidelity backup including folders, breach status, TOTP secrets, and timestamps). All import and export processing happens entirely in the browser.
+
 ---
 
 ## Security Model
@@ -50,6 +66,8 @@ TOTP codes are generated client-side using a pure Web Crypto implementation of R
 | Vault encryption | AES-256-GCM |
 | Vault key derivation | SHA-256 from private key |
 | Recovery key derivation | PBKDF2, 200,000 iterations, SHA-256 |
+| Second device key derivation | PBKDF2, 200,000 iterations, SHA-256 (shared salt for file + passphrase paths) |
+| Credential sharing | Ephemeral ECDH P-256 + AES-256-GCM, key in URL fragment only |
 | Server storage | Public key + encrypted blob only |
 | Private key location | User-controlled file, never transmitted |
 | Session | HttpOnly cookie, SameSite Strict, 15-min TTL |
@@ -57,22 +75,23 @@ TOTP codes are generated client-side using a pure Web Crypto implementation of R
 | Brute force protection | 3 failed attempts triggers 5-minute lockout |
 | Breach check | HIBP k-Anonymity, SHA-1 prefix only |
 | TOTP | RFC 6238, computed entirely in the browser |
+| Share links | One-time use, server marks consumed on first GET, HTTP 410 on reuse |
 
-The server stores three things: the user's public key, the primary encrypted vault (decryptable only with the private key file), and the recovery vault (decryptable only with the seed phrase). Neither alone is sufficient to access the vault contents.
+The server stores three things per user: the public key, the primary encrypted vault (decryptable only with the private key file), and the recovery vault (decryptable only with the seed phrase). Neither alone is sufficient to access the vault contents. Share ciphertext stored server-side is permanently undecryptable without the URL fragment the server never receives.
 
 ---
 
 ## Browser Compatibility
 
-Key file storage adapts automatically to the browser in use.
+Key file storage adapts automatically to the browser in use. The same logic applies to `.hkv2` second device files.
 
 | Tier | Browsers | Mechanism |
 |---|---|---|
 | 1 | Chrome 86+, Edge 86+ | `showDirectoryPicker()` — writes directly to a selected folder |
 | 2 | Chrome/Edge (no directory) | `showSaveFilePicker()` — saves to a user-chosen location |
-| 3 | Firefox, Safari, iOS, Android | Automatic download of `.hkv` file, loaded via `<input type="file">` at login |
+| 3 | Firefox, Safari, iOS, Android | Automatic download of `.hkv` / `.hkv2` file, loaded via `<input type="file">` at login |
 
-All tiers produce the same `.hkv` key file and use the same cryptographic primitives. There is no functionality difference — only the file management experience differs.
+All tiers produce the same key file format and use identical cryptographic primitives. There is no functionality difference — only the file management experience differs.
 
 ---
 
@@ -96,6 +115,8 @@ All tiers produce the same `.hkv` key file and use the same cryptographic primit
 housekeyvault/
 ├── app/
 │   ├── page.tsx                    # Single-page client application
+│   ├── share/
+│   │   └── [id]/page.tsx           # Public share recipient page (zero auth)
 │   └── api/
 │       ├── auth/
 │       │   ├── register/route.ts   # Store public key, encrypted vault, seed hash
@@ -105,11 +126,15 @@ housekeyvault/
 │       │   └── logout/route.ts     # Invalidate session
 │       ├── vault/
 │       │   └── save/route.ts       # Persist updated encrypted vault blob
+│       ├── share/
+│       │   └── route.ts            # POST create share, GET retrieve (one-time)
 │       └── hibp/route.ts           # k-Anonymity proxy for HIBP API
 └── lib/
     ├── crypto-client.ts            # Web Crypto: keygen, sign, AES-GCM, PBKDF2
     ├── crypto-server.ts            # Node crypto: ECDSA verify, session tokens
     ├── usb-storage.ts              # Cross-browser key file storage (3-tier fallback)
+    ├── share-crypto.ts             # Ephemeral ECDH share creation (client-side)
+    ├── import-export.ts            # Bitwarden / 1Password / LastPass import & export
     ├── api-client.ts               # Typed fetch wrappers
     └── supabase-server.ts          # Supabase admin client
 ```
@@ -118,11 +143,9 @@ housekeyvault/
 
 ## Database Schema
 
-The `users` table requires the following columns.
-
 ```sql
 create table users (
-  id                   uuid primary key default gen_random_uuid(),
+  id                   text primary key default gen_random_uuid()::text,
   public_key           text not null,
   public_key_hash      text unique not null,
   encrypted_vault      text not null,
@@ -144,14 +167,14 @@ create table challenges (
 
 create table sessions (
   id         uuid primary key default gen_random_uuid(),
-  user_id    uuid references users(id) on delete cascade,
+  user_id    text references users(id) on delete cascade,
   token      text unique not null,
   expires_at timestamptz not null,
   created_at timestamptz default now()
 );
 
 create table lockouts (
-  user_id      uuid primary key references users(id) on delete cascade,
+  user_id      text primary key references users(id) on delete cascade,
   fail_count   int default 0,
   locked_until timestamptz,
   last_attempt timestamptz
@@ -164,7 +187,7 @@ create table shares (
   sender_pub_key text not null,
   expires_at     timestamptz not null,
   used           boolean default false,
-  created_by     text references users(id) on delete cascade,
+  created_by     text,
   created_at     timestamptz default now()
 );
 
@@ -203,4 +226,4 @@ Open `http://localhost:3000`.
 
 ## Team
 
-Built at HackUDC 2026, Universidade da Coruna.
+Built at HackUDC 2026, Universidade da Coruña.
