@@ -186,7 +186,7 @@ export function generatePassword(opts: {
 }
 
 export function emptyVault(): VaultData {
-  return { entries: [], createdAt: Date.now(), version: 1 };
+  return { entries: [], folders: [], createdAt: Date.now(), version: 1 };
 }
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
@@ -194,8 +194,18 @@ export function emptyVault(): VaultData {
 export interface VaultEntry {
   id: string; site: string; username: string; password: string;
   url?: string; notes?: string; createdAt: number; updatedAt: number; breached?: boolean;
+  folderId?: string; // <-- NEW: optional folder assignment
+}
+
+export interface VaultFolder {
+  id: string;
+  name: string;
+  createdAt: number;
 }
 
 export interface VaultData {
-  entries: VaultEntry[]; createdAt: number; version: number;
+  entries: VaultEntry[];
+  folders: VaultFolder[];
+  createdAt: number;
+  version: number;
 }
