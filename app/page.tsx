@@ -9,6 +9,7 @@ import {
 } from "@/lib/crypto-client";
 import { setupUSBKey, loadUSBKey, detectTier, type StorageTier } from "@/lib/usb-storage";
 import { api } from "@/lib/api-client";
+import { importAuto, exportBitwardenCSV, exportBitwardenJSON, exportNativeJSON, pickImportFile, type ImportResult } from "@/lib/import-export";
 
 type Screen = "landing"|"create"|"login"|"recover"|"vault"|"paranoia";
 interface SessionState { privateKeyB64:string; publicKeyB64:string; publicKeyHash:string; vault:VaultData; }
@@ -167,7 +168,10 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .status-pill{display:flex;align-items:center;gap:6px;padding:5px 12px;background:var(--jade-dim);border:1px solid rgba(39,174,143,.2);border-radius:20px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--jade);text-transform:uppercase}
 .status-dot{width:6px;height:6px;border-radius:50%;background:var(--jade);animation:pulse 2.5s ease infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.lock-btn{padding:6px 14px;background:transparent;border:1px solid var(--line2);border-radius:var(--r);color:var(--text3);font-family:var(--sans);font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:6px}
+.topbar-btn{padding:5px 12px;background:transparent;border:1px solid var(--line2);border-radius:var(--r);color:var(--text3);font-family:var(--sans);font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:5px;line-height:1;white-space:nowrap;height:30px}
+.topbar-btn svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;flex-shrink:0}
+.topbar-btn:hover{border-color:var(--line2);color:var(--text2)}
+.lock-btn{padding:5px 12px;background:transparent;border:1px solid var(--line2);border-radius:var(--r);color:var(--text3);font-family:var(--sans);font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:5px;line-height:1;height:30px}
 .lock-btn svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5}
 .lock-btn:hover{border-color:var(--crimson);color:var(--crimson)}
 /* MAIN PANEL */
@@ -182,7 +186,7 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .search-inp{background:var(--ink3);border:1px solid var(--line);border-radius:var(--r);padding:8px 12px 8px 32px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;width:190px;transition:border-color .2s}
 .search-inp:focus{border-color:rgba(201,168,76,.4)}
 .search-inp::placeholder{color:var(--text3)}
-.add-btn{padding:8px 16px;background:var(--gold);color:var(--ink);border:none;border-radius:var(--r);font-family:var(--sans);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.add-btn{padding:5px 14px;height:30px;background:var(--gold);color:var(--ink);border:none;border-radius:var(--r);font-family:var(--sans);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:5px;white-space:nowrap;line-height:1}
 .add-btn svg{width:13px;height:13px;stroke:var(--ink);fill:none;stroke-width:2}
 .add-btn:hover{background:var(--gold2);transform:translateY(-1px);box-shadow:0 4px 16px rgba(201,168,76,.2)}
 /* ENTRIES */
@@ -344,6 +348,46 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .toast.ok{border-color:rgba(39,174,143,.3);color:var(--jade)}
 .toast.warn{border-color:rgba(192,57,43,.3);color:#E07070}
 @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+/* IMPORT/EXPORT MODAL */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px;animation:appear .2s ease}
+.modal{background:var(--ink2);border:1px solid var(--line2);border-radius:var(--r2);width:100%;max-width:540px;max-height:90vh;overflow-y:auto;position:relative;box-shadow:0 24px 64px rgba(0,0,0,.6)}
+.modal::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold-dim),transparent)}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:20px 24px 16px;border-bottom:1px solid var(--line)}
+.modal-title{font-family:var(--display);font-size:18px;font-weight:400}
+.modal-close{width:28px;height:28px;border-radius:var(--r);border:1px solid var(--line);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text3);transition:all .15s}
+.modal-close:hover{border-color:var(--crimson);color:var(--crimson)}
+.modal-close svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.5}
+.modal-body{padding:20px 24px}
+.modal-tabs{display:flex;gap:2px;margin-bottom:20px;background:var(--ink3);border:1px solid var(--line);border-radius:var(--r);padding:3px}
+.modal-tab{flex:1;padding:7px 12px;border-radius:4px;border:none;background:transparent;color:var(--text3);font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;transition:all .18s;display:flex;align-items:center;justify-content:center;gap:6px}
+.modal-tab svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;flex-shrink:0}
+.modal-tab.active{background:var(--ink2);color:var(--gold);box-shadow:0 1px 4px rgba(0,0,0,.3)}
+.modal-tab:hover:not(.active){color:var(--text2)}
+.fmt-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.fmt-card{border:1px solid var(--line);border-radius:var(--r2);padding:14px;cursor:pointer;transition:all .18s;background:var(--ink3);display:flex;flex-direction:column;gap:4px}
+.fmt-card:hover{border-color:rgba(201,168,76,.4);background:var(--gold-glow)}
+.fmt-card.selected{border-color:var(--gold);background:var(--gold-glow)}
+.fmt-card-name{font-size:12px;font-weight:500;color:var(--text)}
+.fmt-card-desc{font-family:var(--mono);font-size:9px;color:var(--text3);line-height:1.5}
+.fmt-badge{display:inline-flex;padding:1px 5px;border-radius:2px;font-family:var(--mono);font-size:8px;letter-spacing:.06em;text-transform:uppercase;margin-top:2px}
+.fmt-badge.recommended{background:var(--jade-dim);color:var(--jade);border:1px solid rgba(39,174,143,.25)}
+.fmt-badge.compat{background:var(--gold-dim);color:var(--gold);border:1px solid rgba(201,168,76,.25)}
+.drop-zone{border:2px dashed var(--line2);border-radius:var(--r2);padding:32px 24px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:14px}
+.drop-zone:hover,.drop-zone.drag-active{border-color:rgba(201,168,76,.5);background:var(--gold-glow)}
+.drop-zone-icon{width:36px;height:36px;border:1px solid var(--line2);border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center}
+.drop-zone-icon svg{width:16px;height:16px;stroke:var(--text3);fill:none;stroke-width:1.5}
+.drop-zone:hover .drop-zone-icon svg,.drop-zone.drag-active .drop-zone-icon svg{stroke:var(--gold)}
+.drop-zone-label{font-size:13px;font-weight:500;color:var(--text2);margin-bottom:3px}
+.drop-zone-hint{font-family:var(--mono);font-size:10px;color:var(--text3)}
+.import-result{background:var(--jade-dim);border:1px solid rgba(39,174,143,.25);border-radius:var(--r);padding:12px 14px;margin-bottom:14px}
+.import-result-title{font-size:12px;font-weight:500;color:var(--jade);margin-bottom:2px}
+.import-result-sub{font-family:var(--mono);font-size:10px;color:var(--text3)}
+.import-btn-row{display:flex;gap:8px}
+.import-btn-row .btn{flex:1;padding:10px 14px;font-size:11px}
+/* topbar import/export button */
+.io-btn{padding:5px 12px;background:transparent;border:1px solid var(--line2);border-radius:var(--r);color:var(--text3);font-family:var(--sans);font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:5px;line-height:1;height:30px;white-space:nowrap}
+.io-btn svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;flex-shrink:0}
+.io-btn:hover{border-color:var(--gold);color:var(--gold)}
 /* PARANOIA */
 .paranoia-bg{background:radial-gradient(ellipse 60% 60% at 50% 50%,rgba(192,57,43,.06) 0%,transparent 70%),var(--ink)}
 .p-icon{width:72px;height:72px;border:1px solid rgba(192,57,43,.4);border-radius:50%;margin:0 auto 24px;display:flex;align-items:center;justify-content:center;animation:pPulse 1.5s ease infinite}
@@ -381,6 +425,9 @@ const I = {
   Recover:   ()=><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>,
   OTP:       ()=><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/><path d="M9 7h6M9 11h4"/></svg>,
   GripV:     ()=><svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1" fill="currentColor" stroke="none"/></svg>,
+  Upload:    ()=><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+  Download:  ()=><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+  FileJson:  ()=><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"/><path d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"/></svg>,
 };
 
 // ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
@@ -793,6 +840,171 @@ function EntryList({ entries, folders, onCopy, onDelete, onEdit, onCheckBreach, 
   );
 }
 
+// ── IMPORT / EXPORT MODAL ─────────────────────────────────────────────────────
+function ImportExportModal({ entries, onImport, onClose }:{
+  entries: VaultEntry[];
+  onImport: (result: ImportResult) => void;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<"import"|"export">("import");
+  const [exportFmt, setExportFmt] = useState<"bitwarden-csv"|"bitwarden-json"|"housekeyvault-json">("bitwarden-json");
+  const [dragActive, setDragActive] = useState(false);
+  const [pending, setPending] = useState<ImportResult|null>(null);
+  const [error, setError] = useState("");
+
+  const processFile = async (text: string, filename: string) => {
+    setError(""); setPending(null);
+    try {
+      const result = importAuto(text, filename);
+      if (result.entries.length === 0) { setError("No valid login entries found in this file."); return; }
+      setPending(result);
+    } catch (e: any) { setError(e.message ?? "Failed to parse file."); }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault(); setDragActive(false);
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    processFile(await file.text(), file.name);
+  };
+
+  const handlePick = async () => {
+    try {
+      const { text, filename } = await pickImportFile();
+      processFile(text, filename);
+    } catch (e: any) { if (e.message !== "Cancelled.") setError(e.message); }
+  };
+
+  const handleExport = () => {
+    if (exportFmt === "bitwarden-csv")       exportBitwardenCSV(entries);
+    else if (exportFmt === "bitwarden-json") exportBitwardenJSON(entries);
+    else                                      exportNativeJSON(entries);
+  };
+
+  const SOURCE_LABELS: Record<string, string> = {
+    "bitwarden-csv":  "Bitwarden CSV",
+    "bitwarden-json": "Bitwarden JSON",
+    "1password-csv":  "1Password CSV",
+    "lastpass-csv":   "LastPass CSV",
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="modal">
+        <div className="modal-header">
+          <div className="modal-title">Import / Export</div>
+          <button className="modal-close" onClick={onClose}><I.X/></button>
+        </div>
+        <div className="modal-body">
+          <div className="modal-tabs">
+            <button className={`modal-tab ${tab==="import"?"active":""}`} onClick={()=>{setTab("import");setPending(null);setError("");}}>
+              <I.Upload/>Import
+            </button>
+            <button className={`modal-tab ${tab==="export"?"active":""}`} onClick={()=>setTab("export")}>
+              <I.Download/>Export
+            </button>
+          </div>
+
+          {tab==="import" && (<>
+            {!pending && (<>
+              <div style={{marginBottom:10}}>
+                <div className="nav-label" style={{marginBottom:6}}>Supported formats</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {["Bitwarden CSV","Bitwarden JSON","1Password CSV","LastPass CSV"].map(f=>(
+                    <span key={f} className="badge badge-totp" style={{padding:"3px 8px",fontSize:10}}>{f}</span>
+                  ))}
+                </div>
+              </div>
+              <div className={`drop-zone ${dragActive?"drag-active":""}`}
+                onClick={handlePick}
+                onDragOver={e=>{e.preventDefault();setDragActive(true);}}
+                onDragLeave={()=>setDragActive(false)}
+                onDrop={handleDrop}>
+                <div className="drop-zone-icon"><I.Upload/></div>
+                <div className="drop-zone-label">Click to select file or drag and drop</div>
+                <div className="drop-zone-hint">.csv or .json — format is detected automatically</div>
+              </div>
+              {error && <div className="alert alert-warn" style={{marginBottom:0}}><I.Alert/>{error}</div>}
+            </>)}
+
+            {pending && (<>
+              <div className="import-result">
+                <div className="import-result-title">{pending.entries.length} entries ready to import</div>
+                <div className="import-result-sub">
+                  Source: {SOURCE_LABELS[pending.source]}
+                  {pending.skipped > 0 && ` · ${pending.skipped} skipped (not login type or missing fields)`}
+                </div>
+              </div>
+              <div className="alert alert-warn" style={{marginBottom:14}}>
+                <I.Alert/>
+                <span>Existing entries will not be replaced — imports always add new entries. Remove duplicates manually after import.</span>
+              </div>
+              <div style={{background:"var(--ink3)",border:"1px solid var(--line)",borderRadius:"var(--r)",padding:"10px 12px",marginBottom:14,maxHeight:180,overflowY:"auto"}}>
+                {pending.entries.slice(0,8).map((e,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"4px 0",borderBottom:"1px solid var(--line)"}}>
+                    <div style={{width:24,height:24,background:"var(--ink2)",border:"1px solid var(--line)",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:500,color:"var(--text2)",flexShrink:0,textTransform:"uppercase"}}>
+                      {(e.site||"?").charAt(0)}
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:500,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.site}</div>
+                      <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.username}</div>
+                    </div>
+                    {(e as any).totpSecret && <span className="badge badge-totp" style={{fontSize:8}}>2FA</span>}
+                  </div>
+                ))}
+                {pending.entries.length > 8 && (
+                  <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text3)",padding:"6px 0",textAlign:"center"}}>
+                    + {pending.entries.length - 8} more entries
+                  </div>
+                )}
+              </div>
+              <div className="import-btn-row">
+                <button className="btn btn-primary" onClick={()=>{onImport(pending);onClose();}}>
+                  <I.Upload/>Import {pending.entries.length} entries
+                </button>
+                <button className="btn btn-outline" style={{marginTop:0}} onClick={()=>{setPending(null);setError("");}}>
+                  <I.X/>Cancel
+                </button>
+              </div>
+            </>)}
+          </>)}
+
+          {tab==="export" && (<>
+            <div className="nav-label" style={{marginBottom:10}}>Export format</div>
+            <div className="fmt-grid">
+              <div className={`fmt-card ${exportFmt==="bitwarden-json"?"selected":""}`} onClick={()=>setExportFmt("bitwarden-json")}>
+                <div className="fmt-card-name">Bitwarden JSON</div>
+                <div className="fmt-card-desc">Full fidelity. Import directly into Bitwarden, Vaultwarden, or any compatible manager.</div>
+                <span className="fmt-badge recommended">Recommended</span>
+              </div>
+              <div className={`fmt-card ${exportFmt==="bitwarden-csv"?"selected":""}`} onClick={()=>setExportFmt("bitwarden-csv")}>
+                <div className="fmt-card-name">Bitwarden CSV</div>
+                <div className="fmt-card-desc">Logins only. Compatible with Bitwarden, 1Password, LastPass, and most managers.</div>
+                <span className="fmt-badge compat">Universal</span>
+              </div>
+              <div className={`fmt-card ${exportFmt==="housekeyvault-json"?"selected":""}`} onClick={()=>setExportFmt("housekeyvault-json")} style={{gridColumn:"1 / -1"}}>
+                <div className="fmt-card-name">HouseKey Vault JSON</div>
+                <div className="fmt-card-desc">Native format. Preserves folders, breach status, TOTP secrets, and timestamps. Use for backups.</div>
+                <span className="fmt-badge compat">Full backup</span>
+              </div>
+            </div>
+            <div className="alert alert-warn" style={{marginBottom:14}}>
+              <I.Alert/>
+              <span>Export files are unencrypted plaintext. Delete the file immediately after use or store it on an encrypted volume.</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text3)"}}>{entries.length} entries will be exported</div>
+            </div>
+            <button className="btn btn-primary" onClick={handleExport} disabled={entries.length===0} style={{padding:"7px 16px",fontSize:11,height:"auto",width:"auto",alignSelf:"flex-start"}}>
+              <I.Download/>Download export file
+            </button>
+          </>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── VAULT SCREEN ──────────────────────────────────────────────────────────────
 function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>void }) {
   const [vault,setVault]=useState(session.vault);
@@ -803,6 +1015,7 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
   const [activeFolder,setActiveFolder]=useState<string|null>(null);
   const [checking,setChecking]=useState<Record<string,boolean>>({});
   const [toast,setToast]=useState<{msg:string;type:"default"|"ok"|"warn"}|null>(null);
+  const [showIO,setShowIO]=useState(false);
 
   const showToast=(msg:string,type:"default"|"ok"|"warn"="default")=>{setToast({msg,type});setTimeout(()=>setToast(null),2800);};
 
@@ -842,6 +1055,14 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
     showToast(folder?`Moved to ${folder.name}`:"Moved to All","ok");
   };
 
+  const handleImport=async(result:ImportResult)=>{
+    const newEntries=result.entries.map(e=>({
+      ...e, id:crypto.randomUUID(), createdAt:Date.now(), updatedAt:Date.now(),
+    })) as VaultEntry[];
+    await persist([...vault.entries,...newEntries],folders);
+    showToast(`${newEntries.length} entries imported`,"ok");
+  };
+
   const checkBreach=async(entry:VaultEntry)=>{
     setChecking(c=>({...c,[entry.id]:true}));
     try{
@@ -872,6 +1093,7 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
         <Wordmark compact/>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div className="status-pill"><div className="status-dot"/>{saving?"Encrypting":"Vault Secure"}</div>
+          <button className="io-btn" onClick={()=>setShowIO(true)}><I.Upload/>Import<span style={{opacity:.4,margin:"0 2px"}}>/</span><I.Download/>Export</button>
           <button className="lock-btn" onClick={onLogout}><I.Lock/>Lock Vault</button>
         </div>
       </div>
@@ -915,6 +1137,7 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
         </div>
       </div>
       {toast&&<Toast msg={toast.msg} type={toast.type}/>}
+      {showIO&&<ImportExportModal entries={vault.entries} onImport={handleImport} onClose={()=>setShowIO(false)}/>}
     </div>
   );
 }
