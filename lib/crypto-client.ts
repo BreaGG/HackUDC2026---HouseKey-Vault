@@ -73,8 +73,59 @@ export async function signChallenge(
 }
 
 // ─── VAULT ENCRYPTION (AES-256-GCM) ─────────────────────────────────────────
+//
+// Key derivation: HKDF-SHA256
+//
+//   IKM  = raw private key bytes (PKCS-8 DER)
+//   salt = SHA-256(publicKeyB64) — ties the AES key to this specific key pair,
+//          so a key derived from key pair A cannot decrypt a vault from key pair B
+//   info = "housekeyvault-vault-v2" — domain separation, prevents the same IKM
+//          from producing the same key material for any other purpose
+//
+// Why HKDF over raw SHA-256:
+//   The old approach (SHA-256(privateKey)) is a single compression with no
+//   domain separation, no salt, and no stretch. HKDF provides all three
+//   and is the standard KDF for this pattern (RFC 5869).
+//
+// Migration path:
+//   deriveVaultKey(priv, pub)  → HKDF (new, default)
+//   deriveVaultKeyLegacy(priv) → SHA-256 (read-only, for migrating old vaults)
 
-export async function deriveVaultKey(privateKeyB64: string): Promise<CryptoKey> {
+export async function deriveVaultKey(
+  privateKeyB64: string,
+  publicKeyB64: string,
+): Promise<CryptoKey> {
+  const privateKeyBytes = b64ToBuf(privateKeyB64);
+
+  // salt = SHA-256(publicKey) — unique per key pair, non-secret
+  const saltBuf = await crypto.subtle.digest("SHA-256", b64ToBuf(publicKeyB64));
+
+  // Import raw key bytes as HKDF base key
+  const hkdfKey = await crypto.subtle.importKey(
+    "raw", privateKeyBytes,
+    { name: "HKDF" },
+    false, ["deriveKey"]
+  );
+
+  // Derive AES-256-GCM key
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: saltBuf,
+      info: new TextEncoder().encode("housekeyvault-vault-v2"),
+    },
+    hkdfKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+// Legacy derivation — only used to migrate existing vaults on first login.
+// After migration the vault is re-encrypted with the HKDF key and this is
+// never called again.
+export async function deriveVaultKeyLegacy(privateKeyB64: string): Promise<CryptoKey> {
   const privateKeyBytes = b64ToBuf(privateKeyB64);
   const hashBuffer = await crypto.subtle.digest("SHA-256", privateKeyBytes);
   return crypto.subtle.importKey(
@@ -86,10 +137,13 @@ export async function deriveVaultKey(privateKeyB64: string): Promise<CryptoKey> 
 
 export async function encryptVault(
   data: VaultData,
-  privateKeyB64: string
+  privateKeyB64: string,
+  publicKeyB64: string,
 ): Promise<{ encryptedVault: string; vaultIV: string }> {
-  const aesKey = await deriveVaultKey(privateKeyB64);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const aesKey = await deriveVaultKey(privateKeyB64, publicKeyB64);
+  // Fresh random IV on every save — never reuse IV with the same key
+  const ivBytes = crypto.getRandomValues(new Uint8Array(12));
+  const iv = ivBytes.buffer.slice(0, 12) as ArrayBuffer;
   const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     aesKey,
@@ -97,22 +151,46 @@ export async function encryptVault(
   );
   return {
     encryptedVault: bufToB64(ciphertext),
-    vaultIV: bufToB64(iv.buffer as ArrayBuffer),
+    vaultIV: bufToB64(iv),
   };
 }
 
+// Decrypt with automatic legacy fallback:
+//   1. Try HKDF key (new vaults, vault_version >= 2)
+//   2. If that fails, fall back to SHA-256 key (old vaults) and schedule
+//      a silent re-encryption with the HKDF key on next save.
+//   publicKeyB64 is optional — if absent we skip HKDF and go straight to legacy.
 export async function decryptVault(
   encryptedVault: string,
   vaultIV: string,
-  privateKeyB64: string
-): Promise<VaultData> {
-  const aesKey = await deriveVaultKey(privateKeyB64);
+  privateKeyB64: string,
+  publicKeyB64?: string,
+): Promise<VaultData & { _legacyKey?: boolean }> {
+  // Try HKDF first (new vaults)
+  if (publicKeyB64) {
+    try {
+      const aesKey = await deriveVaultKey(privateKeyB64, publicKeyB64);
+      const plaintext = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: b64ToBuf(vaultIV) },
+        aesKey,
+        b64ToBuf(encryptedVault)
+      );
+      return JSON.parse(new TextDecoder().decode(plaintext)) as VaultData;
+    } catch {
+      // Fall through to legacy
+    }
+  }
+
+  // Legacy: SHA-256 key (vaults created before HKDF migration)
+  const legacyKey = await deriveVaultKeyLegacy(privateKeyB64);
   const plaintext = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: b64ToBuf(vaultIV) },
-    aesKey,
+    legacyKey,
     b64ToBuf(encryptedVault)
   );
-  return JSON.parse(new TextDecoder().decode(plaintext)) as VaultData;
+  const vault = JSON.parse(new TextDecoder().decode(plaintext)) as VaultData;
+  // Signal to caller that this vault needs re-encryption with HKDF key
+  return { ...vault, _legacyKey: true };
 }
 
 // ─── PUBLIC KEY HASHING ──────────────────────────────────────────────────────

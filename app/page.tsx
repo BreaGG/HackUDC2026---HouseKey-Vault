@@ -1450,7 +1450,7 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
     setSaving(true);
     try{
       const vd={...vault,entries,_folders:flds} as VaultData;
-      const {encryptedVault,vaultIV}=await encryptVault(vd,session.privateKeyB64);
+      const {encryptedVault,vaultIV}=await encryptVault(vd,session.privateKeyB64,session.publicKeyB64);
       await api.saveVault(encryptedVault,vaultIV);
       setVault(vd);setFolders(flds);
     }catch{showToast("Failed to save","warn");}
@@ -1710,7 +1710,7 @@ function CreateScreen({ onBack, onComplete }:{ onBack:()=>void; onComplete:(s:Se
       setStatus("Generating ECDSA P-256 key pair");
       const {publicKeyB64,privateKeyB64,publicKeyHash}=await generateKeyPair();
       setStatus("Deriving AES-256 vault key");
-      const vault=emptyVault();const {encryptedVault,vaultIV}=await encryptVault(vault,privateKeyB64);
+      const vault=emptyVault();const {encryptedVault,vaultIV}=await encryptVault(vault,privateKeyB64,publicKeyB64);
       setStatus("Writing key to USB");
       const keyTier = await setupUSBKey({privateKeyB64,publicKeyB64,publicKeyHash,createdAt:Date.now(),version:1});
       if(keyTier==="download") setStatus("Key downloaded — save it somewhere safe");
@@ -1774,7 +1774,14 @@ function LoginScreen({ onBack, onSuccess, onParanoia }:{ onBack:()=>void; onSucc
       if(res.error==="LOCKED"){onParanoia(res.remaining??300);return;}
       if(!res.success||!res.encryptedVault)throw new Error("Authentication failed.");
       setMsg("Decrypting vault");
-      const vault=await decryptVault(res.encryptedVault!,res.vaultIV!,kf.privateKeyB64);
+      const vaultRaw=await decryptVault(res.encryptedVault!,res.vaultIV!,kf.privateKeyB64,kf.publicKeyB64);
+      const {_legacyKey,...vault}=vaultRaw;
+      // Silent migration: re-encrypt with HKDF key on first login if vault was SHA-256 derived
+      if(_legacyKey){
+        setMsg("Upgrading vault encryption…");
+        const {encryptedVault:newEnc,vaultIV:newIV}=await encryptVault(vault,kf.privateKeyB64,kf.publicKeyB64);
+        await api.saveVault(newEnc,newIV).catch(()=>{/* non-fatal */});
+      }
       onSuccess({...kf,vault});
     }catch(e:any){if(e?.data?.remaining){onParanoia(e.data.remaining);return;}setStatus("error");setMsg(e.message??"Auth failed.");}
   };
@@ -1815,7 +1822,7 @@ function RecoverScreen({ onBack, onSuccess }:{ onBack:()=>void; onSuccess:(s:Ses
 
       // Generate brand-new key pair for the replacement USB
       const {publicKeyB64,privateKeyB64,publicKeyHash}=await generateKeyPair();
-      const {encryptedVault:newEnc,vaultIV:newIV}=await encryptVault(vault,privateKeyB64);
+      const {encryptedVault:newEnc,vaultIV:newIV}=await encryptVault(vault,privateKeyB64,publicKeyB64);
 
       // Phase 2: update server record + open session (no extra /api/vault/save needed)
       const phase2=await api.recover({
