@@ -6,6 +6,7 @@ import {
   generateKeyPair, signChallenge, encryptVault, decryptVault,
   encryptVaultWithSeed, decryptVaultWithSeed,
   generateSeedPhrase, generatePassword, scorePassword, emptyVault,
+  encryptDecoyVault, decryptDecoyVault,
   type VaultData, type VaultEntry,
 } from "@/lib/crypto-client";
 import { setupUSBKey, loadUSBKey, detectTier, type StorageTier } from "@/lib/usb-storage";
@@ -14,7 +15,7 @@ import { importAuto, exportBitwardenCSV, exportBitwardenJSON, exportNativeJSON, 
 import { createShare, type SharePayload } from "@/lib/share-crypto";
 
 type Screen = "landing"|"create"|"login"|"recover"|"vault"|"paranoia";
-interface SessionState { privateKeyB64:string; publicKeyB64:string; publicKeyHash:string; vault:VaultData; }
+interface SessionState { privateKeyB64:string; publicKeyB64:string; publicKeyHash:string; vault:VaultData; isDuress?:boolean; }
 interface Folder { id:string; name:string; color:string; }
 
 const FOLDER_COLORS = ["#C9A84C","#27AE8F","#C0392B","#5B8DEF","#9B59B6","#E67E22"];
@@ -413,6 +414,9 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .io-btn:hover{border-color:var(--gold);color:var(--gold)}
 /* PARANOIA */
 .paranoia-bg{background:radial-gradient(ellipse 60% 60% at 50% 50%,rgba(192,57,43,.06) 0%,transparent 70%),var(--ink)}
+/* DURESS MODE — barely visible red tint on vault topbar only, not obvious to coercer */
+.duress-indicator{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:9px;color:rgba(192,57,43,.4);letter-spacing:.1em;text-transform:uppercase}
+.duress-dot{width:5px;height:5px;border-radius:50%;background:rgba(192,57,43,.5);animation:pulse 3s ease infinite}
 .p-icon{width:72px;height:72px;border:1px solid rgba(192,57,43,.4);border-radius:50%;margin:0 auto 24px;display:flex;align-items:center;justify-content:center;animation:pPulse 1.5s ease infinite}
 .p-icon svg{width:28px;height:28px;stroke:var(--crimson);fill:none;stroke-width:1.5}
 @keyframes pPulse{0%,100%{box-shadow:0 0 0 0 rgba(192,57,43,.3)}50%{box-shadow:0 0 0 12px rgba(192,57,43,0)}}
@@ -1267,10 +1271,11 @@ function ShareModal({ entry, onClose, onToast }:{
 }
 
 // ── IMPORT / EXPORT MODAL ─────────────────────────────────────────────────────
-function ImportExportModal({ entries, onImport, onClose }:{
+function ImportExportModal({ entries, onImport, onClose, publicKeyHash }:{
   entries: VaultEntry[];
   onImport: (result: ImportResult) => void;
   onClose: () => void;
+  publicKeyHash: string;
 }) {
   const [tab, setTab] = useState<"import"|"export">("import");
   const [exportFmt, setExportFmt] = useState<"bitwarden-csv"|"bitwarden-json"|"housekeyvault-json">("bitwarden-json");
@@ -1302,9 +1307,9 @@ function ImportExportModal({ entries, onImport, onClose }:{
   };
 
   const handleExport = () => {
-    if (exportFmt === "bitwarden-csv")       exportBitwardenCSV(entries);
-    else if (exportFmt === "bitwarden-json") exportBitwardenJSON(entries);
-    else                                      exportNativeJSON(entries);
+    if (exportFmt === "bitwarden-csv")       exportBitwardenCSV(entries, publicKeyHash);
+    else if (exportFmt === "bitwarden-json") exportBitwardenJSON(entries, publicKeyHash);
+    else                                      exportNativeJSON(entries, publicKeyHash);
   };
 
   const SOURCE_LABELS: Record<string, string> = {
@@ -1450,8 +1455,12 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
     setSaving(true);
     try{
       const vd={...vault,entries,_folders:flds} as VaultData;
-      const {encryptedVault,vaultIV}=await encryptVault(vd,session.privateKeyB64,session.publicKeyB64);
-      await api.saveVault(encryptedVault,vaultIV);
+      if(!session.isDuress){
+        // Normal mode: encrypt and persist to server
+        const {encryptedVault,vaultIV}=await encryptVault(vd,session.privateKeyB64,session.publicKeyB64);
+        await api.saveVault(encryptedVault,vaultIV);
+      }
+      // Duress mode: changes are kept in local state only — never touch the real vault on server
       setVault(vd);setFolders(flds);
     }catch{showToast("Failed to save","warn");}
     setSaving(false);
@@ -1570,6 +1579,9 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
       <div className="vault-topbar">
         <Wordmark compact/>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
+          {session.isDuress&&(
+            <div className="duress-indicator"><div className="duress-dot"/>Decoy Mode</div>
+          )}
           <div className="status-pill"><div className="status-dot"/>{saving?"Encrypting":"Vault Secure"}</div>
           <button className="io-btn" onClick={()=>setShowIO(true)}><I.Upload/>Import<span style={{opacity:.4,margin:"0 2px"}}>/</span><I.Download/>Export</button>
           <button className="lock-btn" onClick={onLogout}><I.Lock/>Lock Vault</button>
@@ -1616,7 +1628,7 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
       </div>
       {toast&&<Toast msg={toast.msg} type={toast.type}/>}
       {sharingEntry&&<ShareModal entry={sharingEntry} onClose={()=>setSharingEntry(null)} onToast={showToast}/>}
-      {showIO&&<ImportExportModal entries={vault.entries} onImport={handleImport} onClose={()=>setShowIO(false)}/>}
+      {showIO&&<ImportExportModal entries={vault.entries} onImport={handleImport} onClose={()=>setShowIO(false)} publicKeyHash={session.publicKeyHash}/>}
     </div>
   );
 }
@@ -1705,6 +1717,9 @@ function CreateScreen({ onBack, onComplete }:{ onBack:()=>void; onComplete:(s:Se
   const [step,setStep]=useState(0);const [status,setStatus]=useState("");const [error,setError]=useState("");
   const [seed,setSeed]=useState("");const [confirmed,setConfirmed]=useState(false);const [copied,setCopied]=useState(false);
   const ref=useRef<SessionState|null>(null);
+  const [duressPin,setDuressPin]=useState("");
+  const [showDuressPin,setShowDuressPin]=useState(false);
+
   const setup=async()=>{setError("");setStep(1);
     try{
       setStatus("Generating ECDSA P-256 key pair");
@@ -1716,12 +1731,18 @@ function CreateScreen({ onBack, onComplete }:{ onBack:()=>void; onComplete:(s:Se
       if(keyTier==="download") setStatus("Key downloaded — save it somewhere safe");
       setStatus("Registering with server");
       const seedPhrase = generateSeedPhrase();
-      // Also encrypt vault with seed-derived key so recovery works without USB
       const {encryptedVault:seedEnc,vaultIV:seedIV} = await encryptVaultWithSeed(vault, seedPhrase);
-      // Hash the seed so server can look it up without storing plaintext
       const seedHashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seedPhrase.trim().toLowerCase()));
       const seedHash = Array.from(new Uint8Array(seedHashBuf)).map(b=>b.toString(16).padStart(2,"0")).join("");
-      await api.register({publicKey:publicKeyB64,publicKeyHash,encryptedVault,vaultIV,seedHash,seedEncryptedVault:seedEnc,seedVaultIV:seedIV});
+      // Duress vault: encrypt an empty decoy with PIN-derived key (optional)
+      let duressEncryptedVault: string|undefined, duressVaultIV: string|undefined;
+      if(duressPin.trim().length>=4){
+        setStatus("Generating decoy vault");
+        const decoy=emptyVault();
+        const {encryptedVault:dEnc,vaultIV:dIV}=await encryptDecoyVault(decoy,privateKeyB64,publicKeyB64,duressPin.trim());
+        duressEncryptedVault=dEnc; duressVaultIV=dIV;
+      }
+      await api.register({publicKey:publicKeyB64,publicKeyHash,encryptedVault,vaultIV,seedHash,seedEncryptedVault:seedEnc,seedVaultIV:seedIV,duressEncryptedVault,duressVaultIV});
       setSeed(seedPhrase);ref.current={privateKeyB64,publicKeyB64,publicKeyHash,vault};setStep(2);
     }catch(e:any){setError(e.message??"Setup failed.");setStep(0);}
   };
@@ -1734,6 +1755,22 @@ function CreateScreen({ onBack, onComplete }:{ onBack:()=>void; onComplete:(s:Se
         {error&&<div className="alert alert-warn"><I.Alert/>{error}</div>}
         {step===0&&<><div className="eyebrow">Step 1 of 3</div><div className="h1">Initialize USB key</div>
           <div className="body">Select your USB directory. A <code style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--gold)"}}>housekeyvault.hkv</code> key file will be written.</div>
+          {/* Duress PIN — optional, but shown upfront */}
+          <div style={{background:"var(--ink3)",border:"1px solid var(--line)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:14}}>
+            <div style={{fontFamily:"var(--mono)",fontSize:9,letterSpacing:".15em",textTransform:"uppercase",color:"var(--text2)",marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+              Duress PIN <span style={{color:"var(--text3)"}}>(optional)</span>
+              <span className="tooltip-anchor" data-tip="If someone forces you to open your vault, enter this PIN instead. They see an empty decoy vault. Leave blank to skip. Minimum 4 characters."><I.Help/></span>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <input className="inp" type={showDuressPin?"text":"password"} placeholder="Secret duress PIN — 4+ chars"
+                value={duressPin} onChange={e=>setDuressPin(e.target.value)}
+                style={{flex:1,borderColor:duressPin.length>0&&duressPin.length<4?"rgba(192,57,43,.5)":undefined}}/>
+              <button type="button" style={{background:"transparent",border:"1px solid var(--line)",borderRadius:4,padding:"6px 8px",cursor:"pointer",color:"var(--text3)",display:"flex",alignItems:"center"}} onClick={()=>setShowDuressPin(s=>!s)}>
+                {showDuressPin?<I.EyeOff/>:<I.Eye/>}
+              </button>
+            </div>
+            {duressPin.length>=4&&<div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--jade)",marginTop:4}}>Decoy vault will be created</div>}
+          </div>
           <KeyZoneButton onClick={setup}/>
           <button className="btn btn-ghost" onClick={onBack}>Back</button>
         </>}
@@ -1765,6 +1802,7 @@ function CreateScreen({ onBack, onComplete }:{ onBack:()=>void; onComplete:(s:Se
 // ── LOGIN ─────────────────────────────────────────────────────────────────────
 function LoginScreen({ onBack, onSuccess, onParanoia }:{ onBack:()=>void; onSuccess:(s:SessionState)=>void; onParanoia:(r:number)=>void }) {
   const [status,setStatus]=useState<"idle"|"loading"|"error">("idle");const [msg,setMsg]=useState("");
+  const [duressPin,setDuressPin]=useState("");const [showDuress,setShowDuress]=useState(false);const [showDuressField,setShowDuressField]=useState(false);
   const login=async()=>{setStatus("loading");setMsg("Select USB directory…");
     try{
       const kf=await loadUSBKey();setMsg("Requesting challenge");
@@ -1774,9 +1812,25 @@ function LoginScreen({ onBack, onSuccess, onParanoia }:{ onBack:()=>void; onSucc
       if(res.error==="LOCKED"){onParanoia(res.remaining??300);return;}
       if(!res.success||!res.encryptedVault)throw new Error("Authentication failed.");
       setMsg("Decrypting vault");
+      // Duress mode: if PIN entered AND server returned a decoy blob, decrypt decoy instead
+      const pinTrimmed = duressPin.trim();
+      const hasDuress  = pinTrimmed.length >= 4 && res.duressEncryptedVault && res.duressVaultIV;
+
+      if(hasDuress){
+        setMsg("Entering vault…");
+        const decoyVault = await decryptDecoyVault(
+          res.duressEncryptedVault!, res.duressVaultIV!,
+          kf.privateKeyB64, kf.publicKeyB64, pinTrimmed
+        ).catch(()=>null);
+        // If decoy decryption fails (wrong PIN for decoy), fall through to real vault
+        if(decoyVault){
+          onSuccess({...kf, vault:decoyVault, isDuress:true});
+          return;
+        }
+      }
+
       const vaultRaw=await decryptVault(res.encryptedVault!,res.vaultIV!,kf.privateKeyB64,kf.publicKeyB64);
       const {_legacyKey,...vault}=vaultRaw;
-      // Silent migration: re-encrypt with HKDF key on first login if vault was SHA-256 derived
       if(_legacyKey){
         setMsg("Upgrading vault encryption…");
         const {encryptedVault:newEnc,vaultIV:newIV}=await encryptVault(vault,kf.privateKeyB64,kf.publicKeyB64);
@@ -1792,7 +1846,27 @@ function LoginScreen({ onBack, onSuccess, onParanoia }:{ onBack:()=>void; onSucc
         <div className="body">Select the directory with your <code style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--gold)"}}>housekeyvault.hkv</code> file.</div>
         {status==="error"&&<div className="alert alert-warn"><I.Alert/>{msg}</div>}
         <LoginKeyZone status={status} msg={msg} onLogin={login}/>
+        {/* Duress PIN entry — shown only if user clicks the link */}
+        {showDuressField&&(
+          <div style={{background:"var(--ink3)",border:"1px solid rgba(192,57,43,.2)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:10}}>
+            <div style={{fontFamily:"var(--mono)",fontSize:9,letterSpacing:".15em",textTransform:"uppercase",color:"rgba(192,57,43,.7)",marginBottom:6}}>Duress PIN</div>
+            <div style={{display:"flex",gap:6}}>
+              <input className="inp" type={showDuress?"text":"password"} placeholder="Enter duress PIN"
+                value={duressPin} onChange={e=>setDuressPin(e.target.value)}
+                style={{flex:1,borderColor:"rgba(192,57,43,.3)"}}/>
+              <button type="button" style={{background:"transparent",border:"1px solid var(--line)",borderRadius:4,padding:"6px 8px",cursor:"pointer",color:"var(--text3)",display:"flex",alignItems:"center"}} onClick={()=>setShowDuress(s=>!s)}>
+                {showDuress?<I.EyeOff/>:<I.Eye/>}
+              </button>
+            </div>
+            <div style={{fontFamily:"var(--mono)",fontSize:9,color:"rgba(192,57,43,.5)",marginTop:4}}>The decoy vault will open instead</div>
+          </div>
+        )}
         <button className="btn btn-ghost" onClick={onBack}>Back</button>
+        <div style={{display:"flex",justifyContent:"center"}}>
+          <button style={{background:"transparent",border:"none",color:"var(--text3)",fontFamily:"var(--mono)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase",cursor:"pointer",padding:"4px 0",opacity:.5}} onClick={()=>setShowDuressField(s=>!s)}>
+            {showDuressField?"hide duress mode":"under duress?"}
+          </button>
+        </div>
       </div>
     </div>
   );

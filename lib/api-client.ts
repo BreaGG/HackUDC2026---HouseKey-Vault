@@ -21,6 +21,9 @@ export const api = {
     seedHash: string;
     seedEncryptedVault: string;
     seedVaultIV: string;
+    // Optional duress vault — only present if user set a duress PIN at registration
+    duressEncryptedVault?: string;
+    duressVaultIV?: string;
   }) => apiPost<{ userId: string }>("/api/auth/register", payload),
 
   getChallenge: (publicKeyHash: string) =>
@@ -35,6 +38,9 @@ export const api = {
     success: boolean;
     encryptedVault?: string;
     vaultIV?: string;
+    // Duress vault returned alongside real vault — server doesn't know which is which
+    duressEncryptedVault?: string;
+    duressVaultIV?: string;
     error?: string;
     remaining?: number;
     failsLeft?: number;

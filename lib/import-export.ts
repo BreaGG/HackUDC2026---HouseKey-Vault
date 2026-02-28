@@ -251,7 +251,10 @@ export function importAuto(text: string, filename: string): ImportResult {
 
 // ─── EXPORT: BITWARDEN CSV ────────────────────────────────────────────────────
 
-export function exportBitwardenCSV(entries: VaultEntry[]): void {
+export function exportBitwardenCSV(entries: VaultEntry[], publicKeyHash = ""): void {
+  const exportedAt = new Date().toISOString();
+  const watermark  = publicKeyHash ? buildWatermark(publicKeyHash, exportedAt) : "";
+
   const header = "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp";
   const rows = entries.map(e => {
     const totp = (e as any).totpSecret
@@ -262,7 +265,8 @@ export function exportBitwardenCSV(entries: VaultEntry[]): void {
       "0",                       // favorite
       "login",                   // type
       csvEscape(e.site),         // name
-      csvEscape((e as any).notes ?? ""),
+      // Watermark injected here — invisible zero-width chars survive CSV round-trips
+      csvEscape(((e as any).notes ?? "") + (e === entries[0] ? watermark : "")),
       "",                        // fields
       "0",                       // reprompt
       csvEscape((e as any).url ?? ""),
@@ -277,11 +281,15 @@ export function exportBitwardenCSV(entries: VaultEntry[]): void {
 
 // ─── EXPORT: BITWARDEN JSON ───────────────────────────────────────────────────
 
-export function exportBitwardenJSON(entries: VaultEntry[]): void {
+export function exportBitwardenJSON(entries: VaultEntry[], publicKeyHash = ""): void {
+  const exportedAt = new Date().toISOString();
+  const watermark  = publicKeyHash ? buildWatermark(publicKeyHash, exportedAt) : "";
+
   const items = entries.map(e => ({
     type:         1,
     name:         e.site,
-    notes:        (e as any).notes ?? null,
+    // Watermark appended to notes of first entry — invisible, survives JSON round-trips
+    notes:        ((e as any).notes ?? "") + (e === entries[0] ? watermark : "") || null,
     favorite:     false,
     reprompt:     0,
     login: {
@@ -297,8 +305,11 @@ export function exportBitwardenJSON(entries: VaultEntry[]): void {
   }));
 
   const payload = {
-    encrypted: false,
-    folders:   [],
+    encrypted:  false,
+    folders:    [],
+    // Watermark also lives here — ignored by all importers
+    _hkv:       watermark || undefined,
+    exportedAt,
     items,
   };
 
@@ -309,14 +320,89 @@ export function exportBitwardenJSON(entries: VaultEntry[]): void {
 // Full fidelity — includes folderId, breached status, timestamps.
 // Not readable by other managers, but perfect for backup.
 
-export function exportNativeJSON(entries: VaultEntry[]): void {
+export function exportNativeJSON(entries: VaultEntry[], publicKeyHash = ""): void {
+  const exportedAt = new Date().toISOString();
+  const watermark  = publicKeyHash ? buildWatermark(publicKeyHash, exportedAt) : "";
+
   const payload = {
-    format:    "housekeyvault",
-    version:   1,
-    exportedAt: new Date().toISOString(),
+    format:     "housekeyvault",
+    version:    1,
+    exportedAt,
+    // Watermark stored explicitly — native format so we can be verbose about it
+    _forensic:  watermark || undefined,
     entries,
   };
   downloadText(JSON.stringify(payload, null, 2), "housekeyvault-export-native.json", "application/json");
+}
+
+// ─── STEGANOGRAPHIC WATERMARK ────────────────────────────────────────────────
+// Each export file carries an invisible forensic fingerprint encoded using
+// Unicode zero-width characters (U+200B, U+200C, U+FEFF).
+//
+// Encoding scheme (binary → zero-width chars):
+//   bit 0 → U+200B ZERO WIDTH SPACE
+//   bit 1 → U+200C ZERO WIDTH NON-JOINER
+//   byte boundary → U+FEFF ZERO WIDTH NO-BREAK SPACE (separator)
+//
+// The watermark encodes: exportedAt (ISO timestamp) + publicKeyHash (first 16 hex chars)
+// It is injected as a run of invisible chars in a comment / whitespace field
+// that surviving import tools silently ignore. Visually the file looks identical.
+//
+// Forensic use: if an exported file is leaked, the watermark survives copy-paste
+// and reveals exactly when it was exported and which account produced it.
+
+const ZW0  = "\u200B"; // zero-width space  → bit 0
+const ZW1  = "\u200C"; // zero-width non-joiner → bit 1
+const ZWSEP= "\uFEFF"; // BOM / zero-width no-break space → byte separator
+
+/** Encode a UTF-8 string as a run of zero-width unicode characters. */
+function zwEncode(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  return Array.from(bytes)
+    .map(byte =>
+      Array.from({ length: 8 }, (_, i) => (byte >> (7 - i)) & 1 ? ZW1 : ZW0).join("") + ZWSEP
+    )
+    .join("");
+}
+
+/** Decode zero-width characters back to the original string. Throws if malformed. */
+export function zwDecode(text: string): string {
+  // Extract only our zero-width chars
+  const zw = Array.from(text).filter(c => c === ZW0 || c === ZW1 || c === ZWSEP);
+  const byteStrs = zw.join("").split(ZWSEP).filter(s => s.length === 8);
+  const bytes = byteStrs.map(s =>
+    parseInt(Array.from(s).map(c => c === ZW1 ? "1" : "0").join(""), 2)
+  );
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+/**
+ * Build a watermark string for injection into exports.
+ * @param publicKeyHash  hex string — identifies the account
+ * @param exportedAt     ISO timestamp — when the export happened
+ */
+export function buildWatermark(publicKeyHash: string, exportedAt: string): string {
+  const payload = JSON.stringify({
+    hkv: true,
+    account: publicKeyHash.slice(0, 16),   // 16 hex chars = 64-bit fingerprint
+    at: exportedAt,
+  });
+  return zwEncode(payload);
+}
+
+/**
+ * Attempt to extract and decode a HouseKey watermark from any text.
+ * Returns null if no valid watermark is found.
+ */
+export function extractWatermark(text: string): { account: string; at: string } | null {
+  try {
+    const decoded = zwDecode(text);
+    const obj = JSON.parse(decoded);
+    if (obj.hkv && obj.account && obj.at) return { account: obj.account, at: obj.at };
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── FILE PICKER HELPER ───────────────────────────────────────────────────────

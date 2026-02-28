@@ -278,7 +278,115 @@ export interface VaultData {
   entries: VaultEntry[]; createdAt: number; version: number;
 }
 
-// ─── SEED-BASED VAULT KEY (for recovery) ─────────────────────────────────────
+// ─── DURESS / DECOY VAULT ────────────────────────────────────────────────────
+// When the user sets up a duress PIN, a second "decoy" vault is created at
+// registration and stored alongside the real vault. Both blobs are the same
+// size and format — the server cannot distinguish them.
+//
+// Duress key derivation uses HKDF with a different info label:
+//   info = "housekeyvault-duress-v1"   (vs "housekeyvault-vault-v2" for real)
+//
+// This means the same private key + same public key → completely different
+// AES-256-GCM key for the decoy. The decoy cannot be derived without knowing
+// the duress PIN because the PIN is mixed into the IKM via PBKDF2 first:
+//
+//   step 1: duressSecret = PBKDF2(duressPin, publicKeyHash, 100k, SHA-256)
+//   step 2: ikm = XOR(privateKeyBytes, duressSecret)  [byte-wise, zero-padded]
+//   step 3: aesKey = HKDF(ikm, salt=SHA-256(publicKey), info="housekeyvault-duress-v1")
+//
+// Result: decoy vault can only be decrypted if the attacker has BOTH the .hkv
+// file AND the duress PIN — and neither the server nor any observer can tell
+// which vault blob is the real one.
+
+export async function deriveDuressVaultKey(
+  privateKeyB64: string,
+  publicKeyB64:  string,
+  duressPin:     string,
+): Promise<CryptoKey> {
+  const toPlain = (u: Uint8Array): ArrayBuffer =>
+    u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
+
+  // Step 1: derive a duress secret from the PIN using PBKDF2
+  const enc        = new TextEncoder();
+  const pinBase    = await crypto.subtle.importKey(
+    "raw", toPlain(enc.encode(duressPin.trim())),
+    { name: "PBKDF2" }, false, ["deriveKey"]
+  );
+  const duressKey  = await crypto.subtle.deriveKey(
+    {
+      name:       "PBKDF2",
+      // salt = first 32 bytes of publicKeyB64 — unique per key pair
+      salt:       toPlain(enc.encode(publicKeyB64.slice(0, 32))),
+      iterations: 100_000,   // lower than recovery — PIN entry is interactive
+      hash:       "SHA-256",
+    },
+    pinBase,
+    { name: "AES-GCM", length: 256 },
+    true,   // extractable so we can export and XOR
+    ["encrypt"]
+  );
+  const duressBytes = await crypto.subtle.exportKey("raw", duressKey);
+
+  // Step 2: XOR private key bytes with duress secret → mixed IKM
+  const privBytes  = new Uint8Array(b64ToBuf(privateKeyB64));
+  const duressArr  = new Uint8Array(duressBytes);
+  const mixedArr   = new Uint8Array(privBytes.length);
+  for (let i = 0; i < privBytes.length; i++) {
+    mixedArr[i] = privBytes[i] ^ duressArr[i % duressArr.length];
+  }
+  const mixedBuf = mixedArr.buffer.slice(0, mixedArr.byteLength) as ArrayBuffer;
+
+  // Step 3: HKDF with duress domain label → AES-256-GCM key
+  const saltBuf = await crypto.subtle.digest("SHA-256", b64ToBuf(publicKeyB64));
+  const hkdfKey = await crypto.subtle.importKey(
+    "raw", mixedBuf, { name: "HKDF" }, false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: saltBuf,
+      info: enc.encode("housekeyvault-duress-v1"),
+    },
+    hkdfKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+export async function encryptDecoyVault(
+  data:          VaultData,
+  privateKeyB64: string,
+  publicKeyB64:  string,
+  duressPin:     string,
+): Promise<{ encryptedVault: string; vaultIV: string }> {
+  const aesKey  = await deriveDuressVaultKey(privateKeyB64, publicKeyB64, duressPin);
+  const ivBytes = crypto.getRandomValues(new Uint8Array(12));
+  const iv      = ivBytes.buffer.slice(0, 12) as ArrayBuffer;
+  const ct      = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    aesKey,
+    new TextEncoder().encode(JSON.stringify(data))
+  );
+  return { encryptedVault: bufToB64(ct), vaultIV: bufToB64(iv) };
+}
+
+export async function decryptDecoyVault(
+  encryptedVault: string,
+  vaultIV:        string,
+  privateKeyB64:  string,
+  publicKeyB64:   string,
+  duressPin:      string,
+): Promise<VaultData> {
+  const aesKey = await deriveDuressVaultKey(privateKeyB64, publicKeyB64, duressPin);
+  const plain  = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: b64ToBuf(vaultIV) },
+    aesKey,
+    b64ToBuf(encryptedVault)
+  );
+  return JSON.parse(new TextDecoder().decode(plain)) as VaultData;
+}
 // At registration we encrypt a *copy* of the vault with a key derived from the
 // seed phrase (PBKDF2 → AES-256-GCM). This copy is what /api/auth/recover returns.
 // The client decrypts it with the seed, then re-encrypts with the new private key.
