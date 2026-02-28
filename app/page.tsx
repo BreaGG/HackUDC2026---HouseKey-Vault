@@ -349,6 +349,18 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .toast.ok{border-color:rgba(39,174,143,.3);color:var(--jade)}
 .toast.warn{border-color:rgba(192,57,43,.3);color:#E07070}
 @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+/* TOOLTIP */
+.tooltip-anchor{position:relative;display:inline-flex;align-items:center;cursor:help}
+.tooltip-anchor svg{width:12px;height:12px;stroke:var(--text3);fill:none;stroke-width:1.5}
+.tooltip-anchor::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--ink);border:1px solid var(--line2);border-radius:var(--r);padding:8px 11px;font-family:var(--sans);font-size:11px;font-weight:400;line-height:1.55;color:var(--text2);width:240px;white-space:normal;text-align:left;pointer-events:none;opacity:0;transition:opacity .15s;z-index:50;box-shadow:var(--shadow);letter-spacing:0;text-transform:none}
+.tooltip-anchor:hover::after{opacity:1}
+/* SECOND DEVICE BADGE */
+.badge-2dev{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:3px;font-family:var(--mono);font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--gold);cursor:pointer}
+.badge-2dev svg{width:9px;height:9px;stroke:currentColor;fill:none;stroke-width:1.5}
+/* SECOND DEVICE UNLOCK OVERLAY */
+.unlock-overlay{position:absolute;inset:0;background:rgba(12,12,15,.92);backdrop-filter:blur(6px);border-radius:var(--r2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:10;padding:20px;text-align:center}
+.unlock-icon{width:44px;height:44px;border:1px solid rgba(201,168,76,.4);border-radius:50%;display:flex;align-items:center;justify-content:center}
+.unlock-icon svg{width:18px;height:18px;stroke:var(--gold);fill:none;stroke-width:1.5}
 /* IMPORT/EXPORT MODAL */
 .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px;animation:appear .2s ease}
 .modal{background:var(--ink2);border:1px solid var(--line2);border-radius:var(--r2);width:100%;max-width:540px;max-height:90vh;overflow-y:auto;position:relative;box-shadow:0 24px 64px rgba(0,0,0,.6)}
@@ -437,6 +449,7 @@ const I = {
   Share:     ()=><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>,
   Link:      ()=><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
   GripV:     ()=><svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1" fill="currentColor" stroke="none"/></svg>,
+  Help:      ()=><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
   Upload:    ()=><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
   Download:  ()=><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
   FileJson:  ()=><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"/><path d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"/></svg>,
@@ -597,17 +610,229 @@ function GenPanel({ value, onChange, onToast }:{ value:string; onChange:(v:strin
   );
 }
 
+// ── SECOND DEVICE CRYPTO ─────────────────────────────────────────────────────
+// Protocol: PBKDF2(secret, salt, 200k, SHA-256) → AES-256-GCM
+//
+// At setup: random 32-byte salt + random 32-byte deviceSecret are generated.
+//   .hkv2 file  → secret = deviceSecret  (stored in file, user keeps on second device)
+//   Passphrase  → secret = passphrase text (memorised — same salt derives same AES key)
+//
+// The salt is stored in the vault entry (not secret). Server never sees either secret.
+
+interface DeviceKeyFile {
+  deviceSecret: string; // random 32-byte secret, b64
+  salt:         string; // PBKDF2 salt shared with passphrase path, b64
+  site:         string;
+  createdAt:    number;
+  version:      2;
+}
+interface SetupResult { keyFile: DeviceKeyFile; saltB64: string; }
+
+function _bufToB64(buf: ArrayBuffer): string {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function _b64ToBuf(b64: string): ArrayBuffer {
+  const bin = atob(b64); const buf = new ArrayBuffer(bin.length);
+  const v = new Uint8Array(buf); for (let i = 0; i < bin.length; i++) v[i] = bin.charCodeAt(i);
+  return buf;
+}
+
+async function deriveDeviceAESKey(secret: string, saltB64: string, usage: KeyUsage[]): Promise<CryptoKey> {
+  const base = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(secret), { name: "PBKDF2" }, false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: _b64ToBuf(saltB64), iterations: 200_000, hash: "SHA-256" },
+    base, { name: "AES-GCM", length: 256 }, false, usage
+  );
+}
+
+async function setupDeviceKey(site: string): Promise<SetupResult> {
+  const secretBytes = crypto.getRandomValues(new Uint8Array(32));
+  const saltBytes   = crypto.getRandomValues(new Uint8Array(32));
+  const secretB64   = _bufToB64(secretBytes.buffer.slice(0, 32) as ArrayBuffer);
+  const saltB64     = _bufToB64(saltBytes.buffer.slice(0, 32) as ArrayBuffer);
+  return { keyFile: { deviceSecret: secretB64, salt: saltB64, site, createdAt: Date.now(), version: 2 }, saltB64 };
+}
+
+async function encryptWithDeviceKey(password: string, secret: string, saltB64: string): Promise<{ enc: string; iv: string }> {
+  const aesKey  = await deriveDeviceAESKey(secret, saltB64, ["encrypt"]);
+  const ivBytes = crypto.getRandomValues(new Uint8Array(12));
+  const iv      = ivBytes.buffer.slice(0, 12) as ArrayBuffer;
+  const ct      = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, new TextEncoder().encode(password));
+  return { enc: _bufToB64(ct), iv: _bufToB64(iv) };
+}
+
+async function decryptWithDeviceFile(enc: string, iv: string, kf: DeviceKeyFile): Promise<string> {
+  const aesKey = await deriveDeviceAESKey(kf.deviceSecret, kf.salt, ["decrypt"]);
+  const plain  = await crypto.subtle.decrypt({ name: "AES-GCM", iv: _b64ToBuf(iv) }, aesKey, _b64ToBuf(enc));
+  return new TextDecoder().decode(plain);
+}
+
+async function decryptWithPassphrase(enc: string, iv: string, passphrase: string, saltB64: string): Promise<string> {
+  const aesKey = await deriveDeviceAESKey(passphrase, saltB64, ["decrypt"]);
+  const plain  = await crypto.subtle.decrypt({ name: "AES-GCM", iv: _b64ToBuf(iv) }, aesKey, _b64ToBuf(enc));
+  return new TextDecoder().decode(plain);
+}
+
+// Save .hkv2 using the same 3-tier system as .hkv:
+//   Chrome/Edge desktop → showSaveFilePicker (user picks location)
+//   Other              → blob download (goes to Downloads, user moves to USB)
+async function saveDeviceKeyFile(kf: DeviceKeyFile): Promise<void> {
+  const json     = JSON.stringify(kf, null, 2);
+  const filename = `housekeyvault-${kf.site.replace(/[^a-z0-9]/gi, "-")}.hkv2`;
+
+  // Tier 1: File Save Picker (Chrome/Edge)
+  if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
+    try {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: filename,
+        types: [{ description: "HouseKey Second Device File", accept: { "application/json": [".hkv2"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      return;
+    } catch (e: any) {
+      if (e.name === "AbortError") throw new Error("Cancelled.");
+      // Fall through to download
+    }
+  }
+
+  // Tier 2: Blob download (Firefox, Safari, mobile)
+  const blob = new Blob([json], { type: "application/json" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function loadDeviceKeyFile(): Promise<DeviceKeyFile> {
+  return new Promise((resolve, reject) => {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = ".hkv2,application/json";
+    input.onchange = async () => {
+      const file = input.files?.[0]; if (!file) return reject(new Error("No file selected."));
+      try {
+        const kf = JSON.parse(await file.text()) as DeviceKeyFile;
+        if (!kf.deviceSecret || !kf.salt) throw new Error("Invalid .hkv2 file.");
+        resolve(kf);
+      } catch (e) { reject(e); }
+    };
+    input.oncancel = () => reject(new Error("Cancelled."));
+    input.click();
+  });
+}
+
+// ── UNLOCK SECOND DEVICE MODAL ───────────────────────────────────────────────
+function UnlockSecondDeviceModal({ entry, onUnlock, onClose }:{
+  entry: any;
+  onUnlock: (password: string) => void;
+  onClose: () => void;
+}) {
+  const [mode, setMode]   = useState<"file"|"passphrase">("file");
+  const [passphrase, setPassphrase] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showPP, setShowPP] = useState(false);
+
+  const unlock = async () => {
+    setLoading(true); setError("");
+    try {
+      let pw: string;
+      if (mode === "file") {
+        const kf = await loadDeviceKeyFile();
+        pw = await decryptWithDeviceFile(entry.secondDeviceEncrypted, entry.secondDeviceIV, kf);
+      } else {
+        if (passphrase.length < 12) { setError("Passphrase too short."); setLoading(false); return; }
+        pw = await decryptWithPassphrase(entry.secondDeviceEncrypted, entry.secondDeviceIV, passphrase, entry.secondDeviceSalt);
+      }
+      onUnlock(pw);
+    } catch(e: any) {
+      setError(e.message === "Cancelled." ? "" : (e.message?.includes("operation-specific") ? "Wrong passphrase or incorrect file." : (e.message ?? "Decryption failed.")));
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="modal" style={{maxWidth:400}}>
+        <div className="modal-header">
+          <div className="modal-title" style={{display:"flex",alignItems:"center",gap:8}}><I.Lock/>Second Device Required</div>
+          <button className="modal-close" onClick={onClose}><I.X/></button>
+        </div>
+        <div className="modal-body">
+          <div style={{display:"flex",alignItems:"center",gap:10,background:"var(--ink3)",border:"1px solid rgba(201,168,76,.2)",borderRadius:"var(--r)",padding:"10px 12px",marginBottom:16}}>
+            <SiteAvatar site={entry.site}/>
+            <div>
+              <div style={{fontSize:13,fontWeight:500,color:"var(--text)"}}>{entry.site}</div>
+              <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text3)"}}>Protected by second device</div>
+            </div>
+          </div>
+
+          <div className="modal-tabs" style={{marginBottom:16}}>
+            <button className={`modal-tab ${mode==="file"?"active":""}`} onClick={()=>{setMode("file");setError("");}}>
+              <I.USB/>Use .hkv2 file
+            </button>
+            <button className={`modal-tab ${mode==="passphrase"?"active":""}`} onClick={()=>{setMode("passphrase");setError("");}}>
+              <I.Key/>Emergency passphrase
+            </button>
+          </div>
+
+          {mode==="file" && (
+            <div style={{textAlign:"center",padding:"8px 0 12px"}}>
+              <div style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text3)",marginBottom:12,lineHeight:1.6}}>
+                Select the <strong style={{color:"var(--text)"}}>housekeyvault-{entry.site.replace(/[^a-z0-9]/gi,"-")}.hkv2</strong> file from your second device.
+              </div>
+              <button className="btn btn-primary" onClick={unlock} disabled={loading}
+                style={{padding:"8px 20px",width:"auto",fontSize:11,height:"auto"}}>
+                {loading?"Decrypting…":<><I.Upload/>Select .hkv2 file</>}
+              </button>
+            </div>
+          )}
+
+          {mode==="passphrase" && (
+            <div>
+              <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text3)",marginBottom:10,lineHeight:1.6}}>
+                Enter the emergency passphrase you set when this entry was created.
+              </div>
+              <div style={{display:"flex",gap:6,marginBottom:12}}>
+                <input className="inp" type={showPP?"text":"password"}
+                  placeholder="Your emergency passphrase"
+                  value={passphrase} onChange={e=>setPassphrase(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&unlock()}
+                  style={{flex:1}}
+                />
+                <button style={{background:"transparent",border:"1px solid var(--line)",borderRadius:4,padding:"6px 8px",cursor:"pointer",color:"var(--text3)",display:"flex",alignItems:"center"}} onClick={()=>setShowPP(s=>!s)}>
+                  {showPP?<I.EyeOff/>:<I.Eye/>}
+                </button>
+              </div>
+              <button className="btn btn-primary" onClick={unlock} disabled={loading||passphrase.length<12}
+                style={{padding:"8px 20px",width:"auto",fontSize:11,height:"auto"}}>
+                {loading?"Decrypting…":<><I.Unlock/>Decrypt with passphrase</>}
+              </button>
+            </div>
+          )}
+
+          {error && <div className="alert alert-warn" style={{marginTop:12,marginBottom:0}}><I.Alert/>{error}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ── ENTRY FORM (add & edit) ───────────────────────────────────────────────────
-type EntryFormData = { site:string; username:string; password:string; url:string; notes:string; folderId:string; totpSecret:string; };
+type EntryFormData = { site:string; username:string; password:string; url:string; notes:string; folderId:string; totpSecret:string; secondDevice:boolean; recoveryPassphrase:string; };
 
 function EntryForm({ initial, folders, onSave, onCancel, onToast, mode }:{
   initial?: EntryFormData; folders:Folder[]; mode:"add"|"edit";
   onSave:(d:EntryFormData)=>void; onCancel:()=>void; onToast:(m:string,t?:"ok"|"warn")=>void;
 }) {
-  const [form, setForm] = useState<EntryFormData>(initial ?? {site:"",username:"",password:"",url:"",notes:"",folderId:"",totpSecret:""});
+  const [form, setForm] = useState<EntryFormData>(initial ?? {site:"",username:"",password:"",url:"",notes:"",folderId:"",totpSecret:"",secondDevice:false,recoveryPassphrase:""});
+  const [showPassphrase, setShowPassphrase] = useState(false);
   const [showTotp, setShowTotp] = useState(!!(initial?.totpSecret));
   const set=(k:keyof EntryFormData)=>(e:React.ChangeEvent<HTMLInputElement|HTMLSelectElement>)=>setForm(f=>({...f,[k]:e.target.value}));
-  const valid = form.site.trim() && form.username.trim() && form.password.trim();
+  const valid = form.site.trim() && form.username.trim() && form.password.trim() && (!form.secondDevice || form.recoveryPassphrase.length >= 12);
 
   return (
     <div className={mode==="add"?"add-form":"entry-edit-panel"}>
@@ -636,6 +861,48 @@ function EntryForm({ initial, folders, onSave, onCancel, onToast, mode }:{
         {form.totpSecret&&<div style={{marginTop:6}}><TOTPChip secret={form.totpSecret} onCopy={()=>{}}/></div>}
       </div>}
       <div className="field" style={{marginTop:10}}><div className="field-label">Notes</div><input className="inp" placeholder="2FA codes, recovery email…" value={form.notes} onChange={set("notes")}/></div>
+      <div className="sec-label" style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:0}}>
+        <span style={{display:"flex",alignItems:"center",gap:6}}>
+          Second Device Lock
+          <span className="tooltip-anchor" data-tip="Adds a second encryption layer using a separate key file stored on a different physical device. To view this password you need both your main key file AND the .hkv2 file. If you lose the .hkv2 file, you can still recover using your emergency passphrase. Recommended for bank accounts, crypto wallets, and critical credentials.">
+            <I.Help/>
+          </span>
+        </span>
+        <button style={{background:"transparent",border:`1px solid ${form.secondDevice?"rgba(201,168,76,.5)":"var(--line)"}`,borderRadius:4,padding:"2px 8px",color:form.secondDevice?"var(--gold)":"var(--text3)",fontFamily:"var(--mono)",fontSize:9,cursor:"pointer",letterSpacing:".06em",textTransform:"uppercase",transition:"all .2s"}}
+          onClick={()=>setForm(f=>({...f,secondDevice:!f.secondDevice,recoveryPassphrase:""}))}>
+          {form.secondDevice?"Enabled":"Enable"}
+        </button>
+      </div>
+      {form.secondDevice&&<>
+        <div className="alert alert-warn" style={{marginTop:8,marginBottom:8}}>
+          <I.Alert/><span>On save, a <strong style={{color:"var(--text)"}}>.hkv2</strong> key file will be downloaded. Store it on a separate USB or device. You will need it every time you want to view this password.</span>
+        </div>
+        <div className="field" style={{marginBottom:0}}>
+          <div className="field-label" style={{display:"flex",alignItems:"center",gap:6}}>
+            Emergency Recovery Passphrase
+            <span className="tooltip-anchor" data-tip="If you lose the .hkv2 file, this passphrase lets you recover the password. It is NOT stored anywhere — memorise it or keep it in a secure location. It must be at least 12 characters.">
+              <I.Help/>
+            </span>
+          </div>
+          <div style={{position:"relative",display:"flex",gap:6,alignItems:"center"}}>
+            <input className="inp" type={showPassphrase?"text":"password"}
+              placeholder="At least 12 characters — memorise this"
+              value={form.recoveryPassphrase}
+              onChange={e=>setForm(f=>({...f,recoveryPassphrase:e.target.value}))}
+              style={{flex:1,borderColor:form.recoveryPassphrase.length>0&&form.recoveryPassphrase.length<12?"rgba(192,57,43,.5)":undefined}}
+            />
+            <button type="button" style={{background:"transparent",border:"1px solid var(--line)",borderRadius:4,padding:"6px 8px",cursor:"pointer",color:"var(--text3)",display:"flex",alignItems:"center"}} onClick={()=>setShowPassphrase(s=>!s)}>
+              {showPassphrase?<I.EyeOff/>:<I.Eye/>}
+            </button>
+          </div>
+          {form.recoveryPassphrase.length>0&&form.recoveryPassphrase.length<12&&(
+            <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--crimson)",marginTop:4}}>Passphrase must be at least 12 characters</div>
+          )}
+          {form.recoveryPassphrase.length>=12&&(
+            <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--jade)",marginTop:4}}>Passphrase strength looks good</div>
+          )}
+        </div>
+      </>}
       <div className="form-actions">
         <button className="btn btn-primary" onClick={()=>valid&&onSave(form)} disabled={!valid}>
           {mode==="add"?"Save Entry":"Update Entry"}
@@ -766,6 +1033,15 @@ function EntryList({ entries, folders, onCopy, onDelete, onEdit, onCheckBreach, 
   onCheckBreach:(e:VaultEntry)=>void; onShare:(e:VaultEntry)=>void; checking:Record<string,boolean>;
 }) {
   const [vis,setVis]=useState<Record<string,boolean>>({});
+  const [unlockedPw,setUnlockedPw]=useState<Record<string,string>>({});
+  const [unlockTarget,setUnlockTarget]=useState<{entry:any;action:"copy"|"reveal"}|null>(null);
+
+  const handleUnlocked=(pw:string)=>{
+    if(!unlockTarget) return;
+    if(unlockTarget.action==="copy") onCopy(pw,"Password");
+    else { setUnlockedPw(p=>({...p,[unlockTarget.entry.id]:pw})); setVis(v=>({...v,[unlockTarget.entry.id]:true})); }
+    setUnlockTarget(null);
+  };
   const [editingId,setEditingId]=useState<string|null>(null);
   const [draggingId,setDraggingId]=useState<string|null>(null);
   const [dragOverId,setDragOverId]=useState<string|null>(null);
@@ -804,7 +1080,7 @@ function EntryList({ entries, folders, onCopy, onDelete, onEdit, onCheckBreach, 
           <div key={e.id}>
             <EntryForm
               mode="edit"
-              initial={{site:e.site,username:e.username,password:e.password,url:(e as any).url??"",notes:(e as any).notes??"",folderId:(e as any).folderId??"",totpSecret:totp??""}}
+              initial={{site:e.site,username:e.username,password:e.password,url:(e as any).url??"",notes:(e as any).notes??"",folderId:(e as any).folderId??"",totpSecret:totp??"",secondDevice:!!(e as any).secondDeviceEncrypted,recoveryPassphrase:""}}
               folders={folders}
               onSave={d=>{onEdit(e.id,d);setEditingId(null);}}
               onCancel={()=>setEditingId(null)}
@@ -830,15 +1106,27 @@ function EntryList({ entries, folders, onCopy, onDelete, onEdit, onCheckBreach, 
                 {e.breached&&<span className="badge badge-danger">Breached</span>}
                 {e.breached===false&&<span className="badge badge-safe">Verified</span>}
                 {totp&&<span className="badge badge-totp"><I.OTP/>2FA</span>}
+                {(e as any).secondDeviceEncrypted&&<span className="badge-2dev"><I.Shield/>2-Device</span>}
               </div>
               <div className="entry-user">{e.username}</div>
-              {vis[e.id]&&<div className="entry-pw">{e.password}</div>}
+              {vis[e.id]&&<div className="entry-pw">{(e as any).secondDeviceEncrypted?(unlockedPw[e.id]??""):e.password}</div>}
               {totp&&<TOTPChip secret={totp} onCopy={t=>{navigator.clipboard.writeText(t);}}/>}
             </div>
             <div className="entry-actions">
-              <button className="icon-btn" onClick={()=>onCopy(e.password,"Password")} title="Copy password"><I.Copy/></button>
+              <button className="icon-btn" title={(e as any).secondDeviceEncrypted?"Requires .hkv2 file to copy":"Copy password"}
+                onClick={()=>{
+                  if((e as any).secondDeviceEncrypted) setUnlockTarget({entry:e,action:"copy"});
+                  else onCopy(e.password,"Password");
+                }}>
+                {(e as any).secondDeviceEncrypted?<I.Lock/>:<I.Copy/>}
+              </button>
               <button className="icon-btn" onClick={()=>onCopy(e.username,"Username")} title="Copy username"><I.User/></button>
-              <button className={`icon-btn ${vis[e.id]?"active":""}`} onClick={()=>setVis(v=>({...v,[e.id]:!v[e.id]}))}>
+              <button className={`icon-btn ${vis[e.id]?"active":""}`} title={(e as any).secondDeviceEncrypted&&!vis[e.id]?"Requires .hkv2 to reveal":undefined}
+                onClick={()=>{
+                  if((e as any).secondDeviceEncrypted&&!vis[e.id]) setUnlockTarget({entry:e,action:"reveal"});
+                  else if(vis[e.id]){ setVis(v=>({...v,[e.id]:false})); setUnlockedPw(p=>{const n={...p};delete n[e.id];return n;}); }
+                  else setVis(v=>({...v,[e.id]:true}));
+                }}>
                 {vis[e.id]?<I.EyeOff/>:<I.Eye/>}
               </button>
               <button className={`icon-btn ${editingId===e.id?"editing":""}`} onClick={()=>setEditingId(id=>id===e.id?null:e.id)} title="Edit entry"><I.Edit/></button>
@@ -849,6 +1137,7 @@ function EntryList({ entries, folders, onCopy, onDelete, onEdit, onCheckBreach, 
           </div>
         );
       })}
+      {unlockTarget&&<UnlockSecondDeviceModal entry={unlockTarget.entry} onUnlock={handleUnlocked} onClose={()=>setUnlockTarget(null)}/>}
     </div>
   );
 }
@@ -1163,11 +1452,39 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
   const copy=async(text:string,label:string)=>{await navigator.clipboard.writeText(text);showToast(`${label} copied`,"ok");};
 
   const handleSave=async(form:EntryFormData)=>{
-    const entry:VaultEntry={id:crypto.randomUUID(),...form,createdAt:Date.now(),updatedAt:Date.now()} as any;
-    await persist([...vault.entries,entry],folders);setShowAdd(false);showToast("Entry saved","ok");
+    const entry:any={id:crypto.randomUUID(),...form,createdAt:Date.now(),updatedAt:Date.now()};
+    if(form.secondDevice){
+      try{
+        const {keyFile,saltB64}=await setupDeviceKey(form.site);
+        // Encrypt with deviceSecret (same key derived from it via PBKDF2)
+        const {enc,iv}=await encryptWithDeviceKey(form.password,keyFile.deviceSecret,saltB64);
+        // Also verify passphrase derives same key (sanity — they use the same salt)
+        entry.secondDeviceEncrypted=enc;
+        entry.secondDeviceIV=iv;
+        entry.secondDeviceSalt=saltB64; // stored so passphrase recovery works
+        delete entry.recoveryPassphrase; // never store passphrase in vault
+        await saveDeviceKeyFile(keyFile);
+        showToast("Second device key downloaded — store it on a separate USB","ok");
+      }catch(e:any){if(e.message!=="Cancelled.")showToast(e.message??"Failed to create device key","warn");return;}
+    } else { delete entry.recoveryPassphrase; }
+    await persist([...vault.entries,entry as VaultEntry],folders);setShowAdd(false);showToast("Entry saved","ok");
   };
   const handleEdit=async(id:string,form:EntryFormData)=>{
-    const updated=vault.entries.map(e=>e.id===id?{...e,...form,updatedAt:Date.now()}:e);
+    const existing:any=vault.entries.find(e=>e.id===id);
+    let extra:any={};
+    if(form.secondDevice&&!existing?.secondDeviceEncrypted){
+      try{
+        const {keyFile,saltB64}=await setupDeviceKey(form.site);
+        const {enc,iv}=await encryptWithDeviceKey(form.password,keyFile.deviceSecret,saltB64);
+        extra={secondDeviceEncrypted:enc,secondDeviceIV:iv,secondDeviceSalt:saltB64};
+        await saveDeviceKeyFile(keyFile);
+        showToast("Second device key downloaded","ok");
+      }catch(e:any){if(e.message!=="Cancelled.")showToast(e.message??"Failed","warn");return;}
+    }else if(!form.secondDevice&&existing?.secondDeviceEncrypted){
+      extra={secondDeviceEncrypted:null,secondDeviceIV:null,secondDeviceSalt:null};
+    }
+    const {recoveryPassphrase:_rp,...formClean}=form as any;
+    const updated=vault.entries.map(e=>e.id===id?{...e,...formClean,...extra,updatedAt:Date.now()}:e);
     await persist(updated,folders);showToast("Entry updated","ok");
   };
   const handleDelete=async(id:string)=>{await persist(vault.entries.filter(e=>e.id!==id),folders);showToast("Entry deleted");};
@@ -1275,9 +1592,10 @@ function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>
 
 // ── LANDING ───────────────────────────────────────────────────────────────────
 function LandingScreen({ onCreate, onLogin, onRecover }:{ onCreate:()=>void; onLogin:()=>void; onRecover:()=>void }) {
-  const tier = detectTier();
-  const tierLabel = tier==="directory"?"USB / folder key":tier==="file"?"File key (.hkv)":"Download key file";
-  const tierHint  = tier==="directory"?"Chrome · Edge · Desktop":"Works on all browsers & mobile";
+  const [tier, setTier] = useState<StorageTier|null>(null);
+  useEffect(()=>{ setTier(detectTier()); }, []);
+  const tierLabel = tier==null?"":tier==="directory"?"USB / folder key":tier==="file"?"File key (.hkv)":"Download key file";
+  const tierHint  = tier==null?"":tier==="directory"?"Chrome · Edge · Desktop":"Works on all browsers & mobile";
   return (
     <div className="screen"><Wordmark/>
       <div className="card">
@@ -1307,7 +1625,8 @@ function LandingScreen({ onCreate, onLogin, onRecover }:{ onCreate:()=>void; onL
 // ── CROSS-BROWSER KEY ZONE COMPONENTS ───────────────────────────────────────
 
 function KeyZoneButton({ onClick }:{ onClick:()=>void }) {
-  const tier = detectTier();
+  const [tier, setTier] = useState<StorageTier>("download");
+  useEffect(()=>{ setTier(detectTier()); }, []);
   const labels = {
     directory: { main:"Select folder",        hint:"Picks a USB or any folder · Chrome/Edge" },
     file:      { main:"Save key file",         hint:"You'll choose where to save the .hkv file" },
@@ -1326,7 +1645,8 @@ function KeyZoneButton({ onClick }:{ onClick:()=>void }) {
 }
 
 function LoginKeyZone({ status, msg, onLogin }:{ status:string; msg:string; onLogin:()=>void }) {
-  const tier = detectTier();
+  const [tier, setTier] = useState<StorageTier>("download");
+  useEffect(()=>{ setTier(detectTier()); }, []);
   const idle = status !== "loading";
   const labels = {
     directory: "Select folder with your .hkv file",
