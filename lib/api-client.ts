@@ -45,14 +45,20 @@ export const api = {
 
   logout: () => apiPost<{ success: boolean }>("/api/auth/logout", {}),
 
-  recover: (seedPhrase: string) =>
+  recover: (payload: {
+    seedPhrase: string;
+    newPublicKey?: string;
+    newPublicKeyHash?: string;
+    newEncryptedVault?: string;
+    newVaultIV?: string;
+  }) =>
     apiPost<{
       success: boolean;
       encryptedVault?: string;
       vaultIV?: string;
       recoveryKey?: string;
       error?: string;
-    }>("/api/auth/recover", { seedPhrase }),
+    }>("/api/auth/recover", payload),
 
   async checkBreached(password: string): Promise<number> {
     const hashBuf = await crypto.subtle.digest(

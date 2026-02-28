@@ -1049,13 +1049,30 @@ function RecoverScreen({ onBack, onSuccess }:{ onBack:()=>void; onSuccess:(s:Ses
     if(!allFilled){setError("Please fill all 12 words.");return;}
     setStatus("loading");setError("");
     try{
-      const seed=words.join(" ");const result=await api.recover(seed);
-      if(!result.success||!result.encryptedVault)throw new Error(result.error??"Recovery failed.");
+      const seed=words.join(" ");
+
+      // Phase 1: get seed-encrypted vault from server
+      const phase1=await api.recover({seedPhrase:seed});
+      if(!phase1.success||!phase1.encryptedVault)throw new Error(phase1.error??"Recovery phrase not recognised.");
+
+      // Decrypt locally with seed-derived key (PBKDF2 → AES-256-GCM)
+      const vault=await decryptVaultWithSeed(phase1.encryptedVault,phase1.vaultIV!,phase1.recoveryKey!);
+
+      // Generate brand-new key pair for the replacement USB
       const {publicKeyB64,privateKeyB64,publicKeyHash}=await generateKeyPair();
-      // Decrypt with seed-derived key (PBKDF2 → AES-256-GCM)
-      const vault=await decryptVaultWithSeed(result.encryptedVault,result.vaultIV!,result.recoveryKey!);
       const {encryptedVault:newEnc,vaultIV:newIV}=await encryptVault(vault,privateKeyB64);
-      await api.saveVault(newEnc,newIV);
+
+      // Phase 2: update server record + open session (no extra /api/vault/save needed)
+      const phase2=await api.recover({
+        seedPhrase:seed,
+        newPublicKey:publicKeyB64,
+        newPublicKeyHash:publicKeyHash,
+        newEncryptedVault:newEnc,
+        newVaultIV:newIV,
+      });
+      if(!phase2.success)throw new Error(phase2.error??"Failed to update vault.");
+
+      // Write new key to USB — user selects folder
       await setupUSBKey({privateKeyB64,publicKeyB64,publicKeyHash,createdAt:Date.now(),version:1});
       onSuccess({privateKeyB64,publicKeyB64,publicKeyHash,vault});
     }catch(e:any){setStatus("error");setError(e.message??"Recovery failed.");}
