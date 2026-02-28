@@ -9,12 +9,43 @@ import {
 import { setupUSBKey, loadUSBKey, isFileSystemAccessSupported, type KeyFile } from "@/lib/usb-storage";
 import { api } from "@/lib/api-client";
 
-type Screen = "landing" | "create" | "login" | "vault" | "paranoia";
-interface SessionState {
-  privateKeyB64: string; publicKeyB64: string;
-  publicKeyHash: string; vault: VaultData;
+type Screen = "landing"|"create"|"login"|"recover"|"vault"|"paranoia";
+interface SessionState { privateKeyB64:string; publicKeyB64:string; publicKeyHash:string; vault:VaultData; }
+interface Folder { id:string; name:string; color:string; }
+
+const FOLDER_COLORS = ["#C9A84C","#27AE8F","#C0392B","#5B8DEF","#9B59B6","#E67E22"];
+
+// ── SITE LOGOS ─────────────────────────────────────────────────────────────────
+const LOGOS: Record<string,(c:string)=>React.ReactNode> = {
+  google:    c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>,
+  github:    c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>,
+  youtube:   c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>,
+  twitter:   c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.748l7.73-8.835L1.254 2.25H8.08l4.259 5.631 5.905-5.631zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>,
+  x:         c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.748l7.73-8.835L1.254 2.25H8.08l4.259 5.631 5.905-5.631zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>,
+  linkedin:  c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>,
+  facebook:  c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>,
+  instagram: c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>,
+  spotify:   c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>,
+  netflix:   c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M5.398 0v.006c3.028 8.556 5.37 15.175 8.348 23.596 2.344.058 4.85.398 4.854.398-2.8-7.924-5.923-16.747-8.8-24zm8.489 0v9.63L18.6 24c-.508.06-1.06.091-1.6.091-2.8 0-5.38-.558-5.38-.558l.04-.018V0zm-8.49 0v23.569c1.665-.19 3.666-.332 5.432-.332V0z"/></svg>,
+  amazon:    c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M.045 18.02c.072-.116.187-.124.348-.022 3.636 2.11 7.594 3.166 11.87 3.166 2.852 0 5.668-.533 8.447-1.595l.315-.14c.226-.088.39.032.287.224a.985.985 0 0 1-.315.315c-2.315 2.072-5.011 3.233-8.094 3.494-5.036.42-9.527-1.94-11.904-4.65a.635.635 0 0 1-.028-.37zM15.53 3.83c.843-1.012 2.066-1.57 3.245-1.641 1.207.052 2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701z"/></svg>,
+  apple:     c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.54 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>,
+  microsoft: c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zm12.6 0H12.6V0H24v11.4z"/></svg>,
+  discord:   c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>,
+  slack:     c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg>,
+  notion:    c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933z"/></svg>,
+  figma:     c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M15.852 8.981h-4.588V0h4.588c2.476 0 4.49 2.014 4.49 4.49s-2.014 4.491-4.49 4.491zM12.735 7.51h3.117c1.665 0 3.019-1.355 3.019-3.019s-1.354-3.019-3.019-3.019h-3.117V7.51zm0 1.471H8.148c-2.476 0-4.49-2.014-4.49-4.49S5.672 0 8.148 0h4.588v8.981zm-4.587-7.51c-1.665 0-3.019 1.355-3.019 3.019s1.354 3.019 3.019 3.019h3.117V1.471H8.148zm4.587 15.019H8.148c-2.476 0-4.49-2.014-4.49-4.49s2.014-4.49 4.49-4.49h4.588v8.98zM8.148 8.981c-1.665 0-3.019 1.355-3.019 3.019s1.354 3.019 3.019 3.019h3.117V8.981H8.148z"/></svg>,
+  dropbox:   c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M6 1.807L0 5.871l6 4.064 6-4.064L6 1.807zm12 0l-6 4.064 6 4.064 6-4.064L18 1.807zM0 13.999l6 4.064 6-4.064-6-4.064L0 13.999zm18-4.064l-6 4.064 6 4.064 6-4.064-6-4.064zM6 19.139l6 4.054 6-4.054-6-4.064-6 4.064z"/></svg>,
+  reddit:    c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/></svg>,
+  twitch:    c=><svg viewBox="0 0 24 24" width="15" height="15" fill={c}><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg>,
+};
+
+function getSiteLogo(site:string) {
+  const host = site.toLowerCase().replace(/^https?:\/\/(www\.)?/,"").split("/")[0];
+  const key = host.split(".")[0];
+  return LOGOS[key] ?? null;
 }
 
+// ── CSS ────────────────────────────────────────────────────────────────────────
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600&family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -32,11 +63,9 @@ const CSS = `
   --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 32px rgba(0,0,0,.3);
 }
 html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100vh}
-
 .app{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;position:relative;overflow:hidden}
 .app::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(201,168,76,.04) 0%,transparent 60%),radial-gradient(ellipse 50% 80% at 100% 100%,rgba(39,174,143,.03) 0%,transparent 50%);pointer-events:none}
 .app::after{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,.015) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.015) 1px,transparent 1px);background-size:48px 48px;pointer-events:none}
-
 .screen{width:100%;max-width:480px;position:relative;z-index:1;animation:appear .5s cubic-bezier(.16,1,.3,1) forwards}
 .screen-full{max-width:1100px;width:100%}
 @keyframes appear{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
@@ -59,23 +88,55 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 
 /* VAULT LAYOUT */
 .vault-topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px}
-.vault-body{display:grid;grid-template-columns:280px 1fr;gap:14px;align-items:start}
+.vault-body{display:grid;grid-template-columns:256px 1fr;gap:14px;align-items:start}
 @media(max-width:860px){.vault-body{grid-template-columns:1fr}}
-
-/* SIDEBAR */
 .sidebar{display:flex;flex-direction:column;gap:10px;position:sticky;top:24px}
-.sidebar-card{background:var(--ink2);border:1px solid var(--line2);border-radius:var(--r2);padding:20px;position:relative;overflow:hidden}
+.sidebar-card{background:var(--ink2);border:1px solid var(--line2);border-radius:var(--r2);padding:18px;position:relative;overflow:hidden}
 .sidebar-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold-dim),transparent)}
-.nav-label{font-family:var(--mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--text3);margin-bottom:10px}
-.health-mini{display:flex;flex-direction:column;gap:6px}
+.nav-label{font-family:var(--mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--text3);margin-bottom:8px}
+
+/* HEALTH WIDGET */
+.health-mini{display:flex;flex-direction:column;gap:5px}
 .hm-row{display:flex;align-items:center;justify-content:space-between}
 .hm-label{font-family:var(--mono);font-size:10px;color:var(--text3)}
-.hm-val{font-family:var(--mono);font-size:13px;font-weight:500}
-.hm-bar{height:3px;background:var(--line);border-radius:2px;margin-top:2px;overflow:hidden}
+.hm-val{font-family:var(--mono);font-size:12px;font-weight:500}
+.hm-bar{height:2px;background:var(--line);border-radius:2px;margin-top:2px;overflow:hidden}
 .hm-bar-fill{height:100%;border-radius:2px;transition:width .8s ease}
-.score-ring-wrap{display:flex;align-items:center;gap:14px;margin-bottom:14px}
-.score-ring-label{font-family:var(--display);font-size:15px;font-weight:400}
+.score-ring-wrap{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.score-ring-label{font-family:var(--display);font-size:14px;font-weight:400}
 .score-ring-sub{font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:2px}
+
+/* FOLDERS — ultra compact */
+.folder-list{display:flex;flex-direction:column;gap:1px;margin-bottom:4px}
+.fi{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:4px;cursor:pointer;transition:background .14s;position:relative}
+.fi:hover{background:var(--ink3)}
+.fi.on{background:var(--ink3)}
+.fi.on .fi-name{color:var(--text)}
+.fi-dot{width:5px;height:5px;border-radius:1px;flex-shrink:0}
+.fi-icon{flex-shrink:0;opacity:.4}
+.fi-icon svg{display:block}
+.fi-name{font-family:var(--mono);font-size:10px;color:var(--text3);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .14s}
+.fi-count{font-family:var(--mono);font-size:9px;color:var(--text3);min-width:10px;text-align:right}
+.fi-del{position:absolute;right:4px;width:14px;height:14px;border:none;background:transparent;color:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:2px;padding:0;transition:color .12s}
+.fi-del svg{width:9px;height:9px;stroke:currentColor;fill:none;stroke-width:2}
+.fi:hover .fi-del{color:var(--text3)}
+.fi-del:hover{color:var(--crimson)!important}
+
+/* folder create row */
+.fc-row{display:flex;align-items:center;gap:3px;margin-top:4px}
+.fc-inp{flex:1;background:var(--ink3);border:1px solid var(--line);border-radius:4px;padding:4px 7px;color:var(--text);font-family:var(--mono);font-size:10px;outline:none;min-width:0}
+.fc-inp:focus{border-color:rgba(201,168,76,.35)}
+.fc-inp::placeholder{color:var(--text3)}
+.fc-btn{width:22px;height:22px;border:1px solid var(--line);border-radius:4px;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text3);transition:all .14s;flex-shrink:0}
+.fc-btn svg{width:10px;height:10px;stroke:currentColor;fill:none;stroke-width:2}
+.fc-btn.ok:hover{border-color:var(--gold);color:var(--gold);background:var(--gold-dim)}
+.fc-btn.cancel:hover{border-color:var(--crimson);color:var(--crimson)}
+.fc-colors{display:flex;gap:3px;margin-top:4px}
+.fc-c{width:10px;height:10px;border-radius:2px;cursor:pointer;border:1px solid transparent;transition:transform .1s}
+.fc-c.on{border-color:rgba(255,255,255,.5);transform:scale(1.25)}
+.f-new{display:flex;align-items:center;gap:4px;margin-top:4px;padding:3px 6px;border-radius:4px;border:1px dashed var(--line);color:var(--text3);font-family:var(--mono);font-size:9px;letter-spacing:.06em;cursor:pointer;transition:all .15s;width:100%;background:transparent}
+.f-new svg{width:9px;height:9px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0}
+.f-new:hover{border-color:rgba(201,168,76,.4);color:var(--gold)}
 
 /* STATUS / LOCK */
 .status-pill{display:flex;align-items:center;gap:6px;padding:5px 12px;background:var(--jade-dim);border:1px solid rgba(39,174,143,.2);border-radius:20px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--jade);text-transform:uppercase}
@@ -90,17 +151,13 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .toolbar-left{display:flex;flex-direction:column;gap:2px}
 .toolbar-right{display:flex;align-items:center;gap:8px}
-.panel-title{font-family:var(--display);font-size:18px;font-weight:400}
+.panel-title{font-family:var(--display);font-size:18px;font-weight:400;display:flex;align-items:center;gap:7px}
 .panel-meta{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.06em}
-
-/* SEARCH */
 .search-wrap{position:relative}
 .search-wrap svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:13px;height:13px;stroke:var(--text3);fill:none;stroke-width:1.5;pointer-events:none}
 .search-inp{background:var(--ink3);border:1px solid var(--line);border-radius:var(--r);padding:8px 12px 8px 32px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;width:190px;transition:border-color .2s}
 .search-inp:focus{border-color:rgba(201,168,76,.4)}
 .search-inp::placeholder{color:var(--text3)}
-
-/* ADD BTN */
 .add-btn{padding:8px 16px;background:var(--gold);color:var(--ink);border:none;border-radius:var(--r);font-family:var(--sans);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:6px;white-space:nowrap}
 .add-btn svg{width:13px;height:13px;stroke:var(--ink);fill:none;stroke-width:2}
 .add-btn:hover{background:var(--gold2);transform:translateY(-1px);box-shadow:0 4px 16px rgba(201,168,76,.2)}
@@ -110,10 +167,11 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .entry-card{background:var(--ink3);border:1px solid var(--line);border-radius:var(--r2);padding:12px 14px;display:flex;align-items:center;gap:12px;transition:all .18s}
 .entry-card:hover{border-color:var(--line2);background:var(--ink4)}
 .entry-card.breached{border-color:rgba(192,57,43,.3);background:rgba(192,57,43,.04)}
-.entry-avatar{width:32px;height:32px;background:var(--ink4);border:1px solid var(--line);border-radius:var(--r);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:13px;font-weight:500;color:var(--text2);flex-shrink:0;text-transform:uppercase}
+.entry-avatar{width:32px;height:32px;background:var(--ink4);border:1px solid var(--line);border-radius:var(--r);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:13px;font-weight:500;color:var(--text2);flex-shrink:0;text-transform:uppercase;overflow:hidden}
+.entry-avatar.has-logo{background:var(--ink3);border-color:var(--line2)}
 .entry-info{flex:1;min-width:0;overflow:hidden}
 .entry-site{font-size:13px;font-weight:500;color:var(--text);margin-bottom:2px;display:flex;align-items:center;gap:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.entry-user{font-family:var(--mono);font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.entry-user{font-family:var(--mono);font-size:11px;color:var(--text3)}
 .entry-pw{font-family:var(--mono);font-size:11px;color:var(--gold);margin-top:3px;word-break:break-all;line-height:1.4}
 .entry-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
 .icon-btn{width:28px;height:28px;border-radius:var(--r);border:1px solid transparent;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .18s;color:var(--text3)}
@@ -122,8 +180,6 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .icon-btn.danger:hover{background:var(--crimson-dim);border-color:rgba(192,57,43,.3);color:var(--crimson)}
 .icon-btn.active{color:var(--jade)}
 .icon-btn:disabled{opacity:.3;cursor:not-allowed}
-
-/* BADGES */
 .badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:3px;font-family:var(--mono);font-size:9px;font-weight:500;letter-spacing:.08em;text-transform:uppercase}
 .badge-danger{background:var(--crimson-dim);color:#E07070;border:1px solid rgba(192,57,43,.25)}
 .badge-safe{background:var(--jade-dim);color:var(--jade);border:1px solid rgba(39,174,143,.25)}
@@ -139,20 +195,22 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .inp{background:var(--ink2);border:1px solid var(--line);border-radius:var(--r);padding:7px 10px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;width:100%;transition:border-color .2s}
 .inp:focus{border-color:rgba(201,168,76,.4)}
 .inp::placeholder{color:var(--text3)}
+.select{background:var(--ink2);border:1px solid var(--line);border-radius:var(--r);padding:7px 10px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;width:100%;cursor:pointer;appearance:none}
+.select option{background:var(--ink2)}
+.form-actions{display:flex;gap:8px;margin-top:12px}
+.form-actions .btn{padding:9px 16px;font-size:11px}
+.btn-cancel{width:auto;flex:0;padding:9px 16px}
 
-/* GEN PANEL — compact horizontal */
+/* GEN PANEL */
 .gen-panel{background:var(--ink2);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;margin-top:6px}
 .gen-tabs{display:flex;gap:4px;margin-bottom:10px}
 .gen-tab{flex:1;padding:5px 8px;border-radius:4px;border:1px solid var(--line);background:transparent;color:var(--text3);font-family:var(--mono);font-size:10px;letter-spacing:.06em;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:5px;text-transform:uppercase}
 .gen-tab svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:1.5;flex-shrink:0}
 .gen-tab.active{background:var(--gold-dim);border-color:rgba(201,168,76,.4);color:var(--gold)}
 .gen-tab:hover:not(.active){border-color:var(--line2);color:var(--text2)}
-
-/* CRYPTO MODE */
 .chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
 .chip{padding:3px 8px;border-radius:3px;border:1px solid var(--line);background:transparent;font-family:var(--mono);font-size:9px;color:var(--text3);cursor:pointer;transition:all .15s;letter-spacing:.04em}
 .chip.on{background:var(--gold-dim);border-color:rgba(201,168,76,.4);color:var(--gold)}
-
 .pw-row{display:flex;gap:6px;align-items:flex-end}
 .pw-row .field{flex:1;margin-bottom:0}
 .gen-btns{display:flex;gap:4px;padding-bottom:1px}
@@ -162,8 +220,6 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .gen-btn:hover svg{stroke:var(--gold)}
 .gen-btn:disabled{opacity:.3;cursor:not-allowed}
 .entropy-note{font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:4px}
-
-/* LLM suggestions */
 .llm-suggestions{display:flex;flex-direction:column;gap:4px;margin-top:6px}
 .llm-sugg{background:var(--ink3);border:1px solid var(--line);border-radius:var(--r);padding:7px 10px;cursor:pointer;transition:all .18s}
 .llm-sugg:hover{border-color:var(--gold)}
@@ -174,11 +230,6 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .str-row{display:flex;gap:3px;margin-top:4px}
 .str-seg{height:2px;flex:1;border-radius:1px;background:var(--line);transition:background .3s}
 .str-label{font-family:var(--mono);font-size:9px;margin-top:2px}
-
-/* FORM ACTIONS */
-.form-actions{display:flex;gap:8px;margin-top:12px}
-.form-actions .btn{padding:9px 16px;font-size:11px}
-.btn-cancel{width:auto;flex:0;padding:9px 16px}
 
 /* EMPTY */
 .empty{text-align:center;padding:40px 24px;color:var(--text3)}
@@ -214,7 +265,7 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .step-bar.active::after{animation:fillBar .4s ease forwards}
 @keyframes fillBar{from{transform:scaleX(0);transform-origin:left}to{transform:scaleX(1);transform-origin:left}}
 
-/* USB ZONE */
+/* USB */
 .usb-zone{border:1px solid var(--line2);border-radius:var(--r2);padding:28px 24px;text-align:center;margin-bottom:16px;cursor:pointer;transition:all .25s;position:relative;overflow:hidden;background:var(--ink3)}
 .usb-zone::before{content:'';position:absolute;inset:0;background:var(--gold-glow);opacity:0;transition:opacity .25s}
 .usb-zone:hover::before,.usb-zone.active::before{opacity:1}
@@ -227,7 +278,7 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .usb-label{font-size:13px;font-weight:500;color:var(--text);margin-bottom:3px;position:relative;z-index:1}
 .usb-hint{font-family:var(--mono);font-size:11px;color:var(--text3);position:relative;z-index:1}
 
-/* SEED */
+/* SEED BOX */
 .seed-box{background:var(--ink);border:1px solid var(--line2);border-radius:var(--r2);padding:16px;margin:14px 0}
 .seed-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .seed-label{font-family:var(--mono);font-size:10px;letter-spacing:.18em;color:var(--text3);text-transform:uppercase}
@@ -240,13 +291,25 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .seed-idx{font-size:9px;color:var(--text3);min-width:14px;font-weight:300}
 .seed-val{font-size:11px;font-weight:400;color:var(--gold2)}
 
+/* RECOVERY — seed word input grid */
+.seed-input-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:14px 0}
+.si{display:flex;align-items:center;gap:4px;background:var(--ink3);border:1px solid var(--line);border-radius:var(--r);padding:5px 7px;transition:border-color .2s}
+.si:focus-within{border-color:rgba(201,168,76,.4)}
+.si.err{border-color:rgba(192,57,43,.5)!important}
+.si-num{font-family:var(--mono);font-size:9px;color:var(--text3);min-width:14px;flex-shrink:0;user-select:none}
+.si-inp{flex:1;background:transparent;border:none;outline:none;color:var(--gold2);font-family:var(--mono);font-size:11px;min-width:0;width:100%}
+.si-inp::placeholder{color:var(--text3)}
+
+/* RECOVERY LINK */
+.recovery-link{background:transparent;border:none;color:var(--text3);font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:color .2s;display:inline-flex;align-items:center;gap:5px;padding:0;margin-top:12px}
+.recovery-link svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:1.5}
+.recovery-link:hover{color:var(--gold)}
+
 /* SEC BAR */
 .sec-bar{display:flex;align-items:center;gap:14px;padding:10px 16px;background:var(--ink3);border:1px solid var(--line);border-radius:var(--r);margin-bottom:14px;flex-wrap:wrap}
 .sec-item{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--text3)}
 .sec-item svg{width:11px;height:11px;stroke:var(--jade);fill:none;stroke-width:1.5}
-
-/* DIVIDER */
-.divider{height:1px;background:var(--line);margin:16px 0}
+.divider{height:1px;background:var(--line);margin:14px 0}
 
 /* TOAST */
 .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--ink3);border:1px solid var(--line2);border-radius:var(--r);padding:10px 20px;font-family:var(--mono);font-size:11px;letter-spacing:.05em;color:var(--text);box-shadow:var(--shadow);animation:toastIn .3s cubic-bezier(.16,1,.3,1);z-index:999;white-space:nowrap}
@@ -265,247 +328,259 @@ html,body{background:var(--ink);color:var(--text);font-family:var(--sans);font-s
 .countdown-label{font-family:var(--mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--text3);text-align:center}
 `;
 
-// ── ICONS ─────────────────────────────────────────────────────────────────────
+// ── ICONS ──────────────────────────────────────────────────────────────────────
 const I = {
-  Key:     ()=><svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M12 15h8M17 15v-2"/></svg>,
-  Lock:    ()=><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>,
-  Unlock:  ()=><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.75-1"/></svg>,
-  USB:     ()=><svg viewBox="0 0 24 24"><path d="M12 2v14M8 12l4 4 4-4M6 19h12"/></svg>,
-  Shield:  ()=><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
-  Copy:    ()=><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>,
-  Check:   ()=><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>,
-  Eye:     ()=><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
-  EyeOff:  ()=><svg viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
-  Trash:   ()=><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>,
-  Search:  ()=><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>,
-  Plus:    ()=><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
-  Shuffle: ()=><svg viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>,
-  Alert:   ()=><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
-  OkCircle:()=><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
-  Vault:   ()=><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="18" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M12 2v1M12 21v1M2 12H1M23 12h-1"/></svg>,
-  Brain:   ()=><svg viewBox="0 0 24 24"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.44-3.14A2.5 2.5 0 0 1 9.5 2"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.44-3.14A2.5 2.5 0 0 0 14.5 2"/></svg>,
-  Dice:    ()=><svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.5" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>,
-  X:       ()=><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
-  User:    ()=><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+  Key:      ()=><svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M12 15h8M17 15v-2"/></svg>,
+  Lock:     ()=><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>,
+  Unlock:   ()=><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.75-1"/></svg>,
+  USB:      ()=><svg viewBox="0 0 24 24"><path d="M12 2v14M8 12l4 4 4-4M6 19h12"/></svg>,
+  Shield:   ()=><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+  Copy:     ()=><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>,
+  Check:    ()=><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>,
+  Eye:      ()=><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+  EyeOff:   ()=><svg viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
+  Trash:    ()=><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>,
+  Search:   ()=><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>,
+  Plus:     ()=><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  Shuffle:  ()=><svg viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>,
+  Alert:    ()=><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+  OkCircle: ()=><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
+  Vault:    ()=><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="18" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M12 2v1M12 21v1M2 12H1M23 12h-1"/></svg>,
+  Brain:    ()=><svg viewBox="0 0 24 24"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.44-3.14A2.5 2.5 0 0 1 9.5 2"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.44-3.14A2.5 2.5 0 0 0 14.5 2"/></svg>,
+  Dice:     ()=><svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.5" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>,
+  X:        ()=><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  User:     ()=><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+  Recover:  ()=><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>,
 };
 
-// ── SHARED ────────────────────────────────────────────────────────────────────
-function Wordmark({ compact }: { compact?: boolean }) {
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function Wordmark({ compact }:{ compact?:boolean }) {
   return (
-    <div className="wordmark" style={compact ? {marginBottom:0} : {}}>
-      <div className="wm-icon"><I.Key /></div>
-      <div>
-        <div className="wm-name">HouseKey Vault</div>
-        <div className="wm-sub">Zero-Knowledge · AES-256</div>
-      </div>
+    <div className="wordmark" style={compact?{marginBottom:0}:{}}>
+      <div className="wm-icon"><I.Key/></div>
+      <div><div className="wm-name">HouseKey Vault</div><div className="wm-sub">Zero-Knowledge · AES-256</div></div>
     </div>
   );
 }
-
-function StrengthMeter({ pw }: { pw: string }) {
+function StrengthMeter({ pw }:{ pw:string }) {
   const { score, label, color } = scorePassword(pw);
   if (!pw) return null;
   return (
     <div>
-      <div className="str-row">
-        {[1,2,3,4].map(i => <div key={i} className="str-seg" style={{background: i<=score ? color : undefined}}/>)}
-      </div>
-      {label && <div className="str-label" style={{color}}>{label}</div>}
+      <div className="str-row">{[1,2,3,4].map(i=><div key={i} className="str-seg" style={{background:i<=score?color:undefined}}/>)}</div>
+      {label&&<div className="str-label" style={{color}}>{label}</div>}
     </div>
   );
 }
-
-function Toast({ msg, type="default" }: { msg:string; type?:"default"|"ok"|"warn" }) {
+function Toast({ msg, type="default" }:{ msg:string; type?:"default"|"ok"|"warn" }) {
   return <div className={`toast ${type!=="default"?type:""}`}>{msg}</div>;
 }
-
-// ── GEN PANEL (compact) ────────────────────────────────────────────────────────
-type LLMStyle = "passphrase"|"creative"|"technical"|"poetic";
-
-interface GenPanelProps {
-  value: string;
-  onChange: (v: string) => void;
-  onToast: (msg: string, type?: "ok"|"warn") => void;
+function SiteAvatar({ site }:{ site:string }) {
+  const logo = getSiteLogo(site);
+  if (logo) return <div className="entry-avatar has-logo">{logo("var(--text2)")}</div>;
+  return <div className="entry-avatar">{site.replace(/^https?:\/\/(www\.)?/,"").charAt(0).toUpperCase()}</div>;
 }
 
-function GenPanel({ value, onChange, onToast }: GenPanelProps) {
-  const [tab, setTab] = useState<"crypto"|"llm">("crypto");
-  const [opts, setOpts] = useState({ length:20, symbols:true, numbers:true, uppercase:true });
-  const [loading, setLoading] = useState<"rng"|"llm"|null>(null);
-  const [llmStyle, setLLMStyle] = useState<LLMStyle>("passphrase");
-  const [theme, setTheme] = useState("");
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [entropy, setEntropy] = useState("");
-
-  const toggleOpt = (k: keyof typeof opts) => setOpts(o => ({...o,[k]:!o[k]}));
-
-  const genCrypto = () => { onChange(generatePassword(opts)); setEntropy("crypto.getRandomValues"); };
-
-  const genRandom = async () => {
+// ── GEN PANEL ─────────────────────────────────────────────────────────────────
+type LLMStyle = "passphrase"|"creative"|"technical"|"poetic";
+function GenPanel({ value, onChange, onToast }:{ value:string; onChange:(v:string)=>void; onToast:(m:string,t?:"ok"|"warn")=>void }) {
+  const [tab,setTab]=useState<"crypto"|"llm">("crypto");
+  const [opts,setOpts]=useState({length:20,symbols:true,numbers:true,uppercase:true});
+  const [loading,setLoading]=useState<"rng"|"llm"|null>(null);
+  const [llmStyle,setLLMStyle]=useState<LLMStyle>("passphrase");
+  const [theme,setTheme]=useState("");
+  const [suggestions,setSuggestions]=useState<string[]>([]);
+  const [entropy,setEntropy]=useState("");
+  const toggleOpt=(k:keyof typeof opts)=>setOpts(o=>({...o,[k]:!o[k]}));
+  const genCrypto=()=>{onChange(generatePassword(opts));setEntropy("crypto.getRandomValues");};
+  const genRandom=async()=>{
     setLoading("rng");
-    try {
-      const res = await fetch("/api/random-password",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(opts)});
-      const d = await res.json();
-      if (d.password) { onChange(d.password); setEntropy(d.source==="random.org"?"Random.org RNG":"crypto.getRandomValues"); }
-    } catch { onToast("Random.org unavailable","warn"); }
+    try{const r=await fetch("/api/random-password",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(opts)});const d=await r.json();if(d.password){onChange(d.password);setEntropy(d.source==="random.org"?"Random.org RNG":"crypto.getRandomValues");}}
+    catch{onToast("Random.org unavailable","warn");}
     setLoading(null);
   };
-
-  const genLLM = async () => {
-    setLoading("llm"); setSuggestions([]);
-    try {
-      const res = await fetch("/api/llm-password",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({style:llmStyle,theme:theme||undefined,count:3})});
-      const d = await res.json();
-      if (d.error==="MODEL_LOADING") onToast("AI loading, retry in 20s","warn");
-      else if (d.passwords?.length) setSuggestions(d.passwords);
+  const genLLM=async()=>{
+    setLoading("llm");setSuggestions([]);
+    try{const r=await fetch("/api/llm-password",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({style:llmStyle,theme:theme||undefined,count:3})});const d=await r.json();
+      if(d.error==="MODEL_LOADING")onToast("AI loading, retry in 20s","warn");
+      else if(d.passwords?.length)setSuggestions(d.passwords);
       else onToast(d.error??"Generation failed","warn");
-    } catch { onToast("AI unavailable","warn"); }
+    }catch{onToast("AI unavailable","warn");}
     setLoading(null);
   };
-
   return (
     <div className="gen-panel">
-      {/* TABS */}
       <div className="gen-tabs">
-        <button className={`gen-tab ${tab==="crypto"?"active":""}`} onClick={()=>setTab("crypto")}>
-          <I.Dice />Cryptographic
-        </button>
-        <button className={`gen-tab ${tab==="llm"?"active":""}`} onClick={()=>setTab("llm")}>
-          <I.Brain />AI Creative
-        </button>
+        <button className={`gen-tab ${tab==="crypto"?"active":""}`} onClick={()=>setTab("crypto")}><I.Dice/>Crypto</button>
+        <button className={`gen-tab ${tab==="llm"?"active":""}`} onClick={()=>setTab("llm")}><I.Brain/>AI</button>
       </div>
-
-      {tab==="crypto" && <>
+      {tab==="crypto"&&<>
         <div className="chips">
-          {(["symbols","numbers","uppercase"] as const).map(k=>(
-            <button key={k} className={`chip ${opts[k]?"on":""}`} onClick={()=>toggleOpt(k)}>{k}</button>
-          ))}
-          {[16,20,24,32].map(l=>(
-            <button key={l} className={`chip ${opts.length===l?"on":""}`} onClick={()=>setOpts(o=>({...o,length:l}))}>{l}ch</button>
-          ))}
+          {(["symbols","numbers","uppercase"] as const).map(k=><button key={k} className={`chip ${opts[k]?"on":""}`} onClick={()=>toggleOpt(k)}>{k}</button>)}
+          {[16,20,24,32].map(l=><button key={l} className={`chip ${opts.length===l?"on":""}`} onClick={()=>setOpts(o=>({...o,length:l}))}>{l}ch</button>)}
         </div>
         <div className="pw-row">
-          <div className="field">
-            <div className="field-label">Password</div>
-            <input className="inp" type="text" placeholder="Enter or generate"
-              value={value} onChange={e=>onChange(e.target.value)}/>
+          <div className="field"><div className="field-label">Password</div>
+            <input className="inp" type="text" placeholder="Enter or generate" value={value} onChange={e=>onChange(e.target.value)}/>
             <StrengthMeter pw={value}/>
           </div>
           <div className="gen-btns">
             <button className="gen-btn" onClick={genCrypto} title="Browser crypto"><I.Shuffle/></button>
-            <button className="gen-btn" onClick={genRandom} disabled={loading==="rng"} title="Random.org entropy"><I.Dice/></button>
+            <button className="gen-btn" onClick={genRandom} disabled={loading==="rng"} title="Random.org"><I.Dice/></button>
           </div>
         </div>
-        {entropy && <div className="entropy-note">Source: {entropy}</div>}
+        {entropy&&<div className="entropy-note">↳ {entropy}</div>}
       </>}
-
-      {tab==="llm" && <>
+      {tab==="llm"&&<>
         <div className="chips" style={{marginBottom:8}}>
-          {(["passphrase","creative","technical","poetic"] as const).map(s=>(
-            <button key={s} className={`chip ${llmStyle===s?"on":""}`} onClick={()=>setLLMStyle(s)}>{s}</button>
-          ))}
+          {(["passphrase","creative","technical","poetic"] as const).map(s=><button key={s} className={`chip ${llmStyle===s?"on":""}`} onClick={()=>setLLMStyle(s)}>{s}</button>)}
         </div>
         <div className="pw-row">
-          <div className="field">
-            <div className="field-label">Theme (optional)</div>
-            <input className="inp" placeholder='"ocean", "space", "myth"' value={theme} onChange={e=>setTheme(e.target.value)}/>
+          <div className="field"><div className="field-label">Theme (optional)</div>
+            <input className="inp" placeholder='"ocean", "space"…' value={theme} onChange={e=>setTheme(e.target.value)}/>
           </div>
           <div className="gen-btns">
-            <button className="gen-btn" onClick={genLLM} disabled={loading==="llm"} title="Generate with AI" style={{width:30,height:30}}>
-              {loading==="llm" ? <span style={{fontSize:9,color:"var(--text3)"}}>…</span> : <I.Brain/>}
+            <button className="gen-btn" onClick={genLLM} disabled={loading==="llm"} title="Generate with AI">
+              {loading==="llm"?<span style={{fontSize:8,color:"var(--text3)"}}>…</span>:<I.Brain/>}
             </button>
           </div>
         </div>
-        {suggestions.length>0 && (
-          <div className="llm-suggestions" style={{marginTop:6}}>
-            {suggestions.map((pw,i)=>(
-              <div key={i} className={`llm-sugg ${value===pw?"selected":""}`} onClick={()=>onChange(pw)}>
-                <span className="llm-pw">{pw}</span>
-                <StrengthMeter pw={pw}/>
-              </div>
-            ))}
-          </div>
-        )}
-        {value && suggestions.length>0 && (
-          <div className="field" style={{marginTop:6}}>
-            <div className="field-label">Selected</div>
-            <input className="inp" type="text" value={value} onChange={e=>onChange(e.target.value)}/>
-          </div>
-        )}
+        {suggestions.length>0&&<div className="llm-suggestions">
+          {suggestions.map((pw,i)=>(
+            <div key={i} className={`llm-sugg ${value===pw?"selected":""}`} onClick={()=>onChange(pw)}>
+              <span className="llm-pw">{pw}</span><StrengthMeter pw={pw}/>
+            </div>
+          ))}
+        </div>}
+        {value&&suggestions.length>0&&<div className="field" style={{marginTop:6}}>
+          <div className="field-label">Selected</div>
+          <input className="inp" type="text" value={value} onChange={e=>onChange(e.target.value)}/>
+        </div>}
       </>}
     </div>
   );
 }
 
 // ── ADD FORM ──────────────────────────────────────────────────────────────────
-interface AddFormProps {
-  onSave: (e: Omit<VaultEntry,"id"|"createdAt"|"updatedAt">) => void;
-  onCancel: () => void;
-  onToast: (msg: string, type?: "ok"|"warn") => void;
-}
-
-function AddForm({ onSave, onCancel, onToast }: AddFormProps) {
-  const [form, setForm] = useState({site:"",username:"",password:"",url:"",notes:""});
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f=>({...f,[k]:e.target.value}));
+function AddForm({ onSave, onCancel, onToast, folders }:{
+  onSave:(e:Omit<VaultEntry,"id"|"createdAt"|"updatedAt">)=>void;
+  onCancel:()=>void; onToast:(m:string,t?:"ok"|"warn")=>void; folders:Folder[];
+}) {
+  const [form,setForm]=useState({site:"",username:"",password:"",url:"",notes:"",folderId:""});
+  const set=(k:keyof typeof form)=>(e:React.ChangeEvent<HTMLInputElement|HTMLSelectElement>)=>setForm(f=>({...f,[k]:e.target.value}));
   return (
     <div className="add-form">
       <div className="sec-label">Service Details</div>
       <div className="form-row">
-        <div className="field">
-          <div className="field-label">Website</div>
-          <input className="inp" placeholder="github.com" value={form.site} onChange={set("site")}/>
-        </div>
-        <div className="field">
-          <div className="field-label">URL (optional)</div>
-          <input className="inp" placeholder="https://..." value={form.url} onChange={set("url")}/>
-        </div>
+        <div className="field"><div className="field-label">Website</div><input className="inp" placeholder="github.com" value={form.site} onChange={set("site")}/></div>
+        <div className="field"><div className="field-label">URL (optional)</div><input className="inp" placeholder="https://…" value={form.url} onChange={set("url")}/></div>
       </div>
-      <div className="field">
-        <div className="field-label">Username / Email</div>
-        <input className="inp" placeholder="you@email.com" value={form.username} onChange={set("username")}/>
-      </div>
+      <div className="field"><div className="field-label">Username / Email</div><input className="inp" placeholder="you@email.com" value={form.username} onChange={set("username")}/></div>
+      {folders.length>0&&<div className="field"><div className="field-label">Folder</div>
+        <select className="select" value={form.folderId} onChange={set("folderId")}>
+          <option value="">— No folder —</option>
+          {folders.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+        </select>
+      </div>}
       <div className="sec-label">Password</div>
       <GenPanel value={form.password} onChange={v=>setForm(f=>({...f,password:v}))} onToast={onToast}/>
-      <div className="field" style={{marginTop:10}}>
-        <div className="field-label">Notes (optional)</div>
-        <input className="inp" placeholder="2FA codes, recovery email..." value={form.notes} onChange={set("notes")}/>
-      </div>
+      <div className="field" style={{marginTop:10}}><div className="field-label">Notes (optional)</div><input className="inp" placeholder="2FA, recovery email…" value={form.notes} onChange={set("notes")}/></div>
       <div className="form-actions">
-        <button className="btn btn-primary" onClick={()=>onSave(form)} disabled={!form.site||!form.username||!form.password}>Save Entry</button>
+        <button className="btn btn-primary" onClick={()=>onSave(form as any)} disabled={!form.site||!form.username||!form.password}>Save Entry</button>
         <button className="btn btn-outline btn-cancel" onClick={onCancel}>Cancel</button>
       </div>
     </div>
   );
 }
 
+// ── FOLDER PANEL — ultra compact ──────────────────────────────────────────────
+function FolderPanel({ folders, entries, active, onSelect, onAdd, onDelete }:{
+  folders:Folder[]; entries:VaultEntry[]; active:string|null;
+  onSelect:(id:string|null)=>void; onAdd:(f:Folder)=>void; onDelete:(id:string)=>void;
+}) {
+  const [creating,setCreating]=useState(false);
+  const [name,setName]=useState("");
+  const [color,setColor]=useState(FOLDER_COLORS[0]);
+  const count=(id:string)=>entries.filter((e:any)=>e.folderId===id).length;
+  const commit=()=>{if(!name.trim())return;onAdd({id:crypto.randomUUID(),name:name.trim(),color});setName("");setCreating(false);};
+
+  return (
+    <div className="sidebar-card" style={{padding:"14px 16px"}}>
+      <div className="nav-label">Folders</div>
+      <div className="folder-list">
+        {/* All */}
+        <div className={`fi ${active===null?"on":""}`} onClick={()=>onSelect(null)}>
+          <span className="fi-icon">
+            <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" fill="none" strokeWidth="1.5">
+              <rect x="2" y="3" width="20" height="18" rx="2"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+          </span>
+          <span className="fi-name">All</span>
+          <span className="fi-count">{entries.length}</span>
+        </div>
+        {/* Individual folders */}
+        {folders.map(f=>(
+          <div key={f.id} className={`fi ${active===f.id?"on":""}`} onClick={()=>onSelect(f.id)}>
+            <div className="fi-dot" style={{background:f.color}}/>
+            <span className="fi-name">{f.name}</span>
+            <span className="fi-count">{count(f.id)}</span>
+            <button className="fi-del" onClick={e=>{e.stopPropagation();onDelete(f.id);}}>
+              <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {creating ? (
+        <div style={{marginTop:5}}>
+          <div className="fc-row">
+            <input className="fc-inp" placeholder="Name…" value={name} autoFocus
+              onChange={e=>setName(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter")commit();if(e.key==="Escape")setCreating(false);}}/>
+            <button className="fc-btn ok" onClick={commit}>
+              <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+            </button>
+            <button className="fc-btn cancel" onClick={()=>setCreating(false)}>
+              <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div className="fc-colors">
+            {FOLDER_COLORS.map(c=><div key={c} className={`fc-c ${color===c?"on":""}`} style={{background:c}} onClick={()=>setColor(c)}/>)}
+          </div>
+        </div>
+      ) : (
+        <button className="f-new" onClick={()=>setCreating(true)}>
+          <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New folder
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── HEALTH WIDGET ─────────────────────────────────────────────────────────────
-function HealthWidget({ entries, onCheckAll }: { entries: VaultEntry[]; onCheckAll: ()=>void }) {
-  const total = entries.length;
-  const breached = entries.filter(e=>e.breached===true).length;
-  const safe = entries.filter(e=>e.breached===false).length;
-  const weak = entries.filter(e=>scorePassword(e.password).score<=2).length;
-  const score = total===0 ? 100 : Math.round((entries.filter(e=>scorePassword(e.password).score>=3&&!e.breached).length/total)*100);
-  const sc = score>=80?"var(--jade)":score>=50?"var(--gold)":"var(--crimson)";
+function HealthWidget({ entries, onCheckAll }:{ entries:VaultEntry[]; onCheckAll:()=>void }) {
+  const total=entries.length,breached=entries.filter(e=>e.breached===true).length,
+    safe=entries.filter(e=>e.breached===false).length,weak=entries.filter(e=>scorePassword(e.password).score<=2).length;
+  const score=total===0?100:Math.round((entries.filter(e=>scorePassword(e.password).score>=3&&!e.breached).length/total)*100);
+  const sc=score>=80?"var(--jade)":score>=50?"var(--gold)":"var(--crimson)";
   return (
     <div className="sidebar-card">
       <div className="score-ring-wrap">
-        <svg viewBox="0 0 56 56" width="56" height="56" style={{flexShrink:0}}>
+        <svg viewBox="0 0 56 56" width="52" height="52" style={{flexShrink:0}}>
           <circle cx="28" cy="28" r="22" fill="none" stroke="var(--line2)" strokeWidth="4"/>
           <circle cx="28" cy="28" r="22" fill="none" stroke={sc} strokeWidth="4"
             strokeDasharray={`${(score/100)*138.2} 138.2`} strokeLinecap="round"
             transform="rotate(-90 28 28)" style={{transition:"stroke-dasharray .8s ease"}}/>
           <text x="28" y="32" textAnchor="middle" fill="var(--text)" style={{fontFamily:"var(--mono)",fontSize:"13px",fontWeight:500}}>{score}</text>
         </svg>
-        <div>
-          <div className="score-ring-label">Security Score</div>
-          <div className="score-ring-sub">{total} credential{total!==1?"s":""}</div>
-        </div>
+        <div><div className="score-ring-label">Security Score</div><div className="score-ring-sub">{total} credential{total!==1?"s":""}</div></div>
       </div>
       <div className="health-mini">
-        {([[breached,"var(--crimson)","Breached"],[safe,"var(--jade)","Safe"],[weak,"var(--gold)","Weak"]] as const).map(([val,color,label])=>(
-          <div key={label}>
-            <div className="hm-row"><span className="hm-label">{label}</span><span className="hm-val" style={{color}}>{val}</span></div>
-            <div className="hm-bar"><div className="hm-bar-fill" style={{width:total>0?`${(Number(val)/total)*100}%`:"0%",background:color}}/></div>
+        {([[breached,"var(--crimson)","Breached"],[safe,"var(--jade)","Safe"],[weak,"var(--gold)","Weak"]] as const).map(([v,c,l])=>(
+          <div key={l}>
+            <div className="hm-row"><span className="hm-label">{l}</span><span className="hm-val" style={{color:c}}>{v}</span></div>
+            <div className="hm-bar"><div className="hm-bar-fill" style={{width:total>0?`${(Number(v)/total)*100}%`:"0%",background:c}}/></div>
           </div>
         ))}
       </div>
@@ -518,41 +593,37 @@ function HealthWidget({ entries, onCheckAll }: { entries: VaultEntry[]; onCheckA
 }
 
 // ── ENTRY LIST ────────────────────────────────────────────────────────────────
-function EntryList({ entries, onCopy, onDelete, onCheckBreach, checking }: {
-  entries: VaultEntry[]; onCopy: (t:string,l:string)=>void;
-  onDelete: (id:string)=>void; onCheckBreach: (e:VaultEntry)=>void;
-  checking: Record<string,boolean>;
+function EntryList({ entries, onCopy, onDelete, onCheckBreach, checking }:{
+  entries:VaultEntry[]; onCopy:(t:string,l:string)=>void;
+  onDelete:(id:string)=>void; onCheckBreach:(e:VaultEntry)=>void; checking:Record<string,boolean>;
 }) {
-  const [visible, setVisible] = useState<Record<string,boolean>>({});
-  if (entries.length===0) return (
-    <div className="empty">
-      <div className="empty-icon"><I.Vault/></div>
-      <div className="empty-title">No entries found</div>
-      <div className="empty-sub">Add your first credential above</div>
+  const [vis,setVis]=useState<Record<string,boolean>>({});
+  if (!entries.length) return (
+    <div className="empty"><div className="empty-icon"><I.Vault/></div>
+      <div className="empty-title">No entries found</div><div className="empty-sub">Add your first credential above</div>
     </div>
   );
   return (
     <div className="entries">
-      {entries.map(entry=>(
-        <div key={entry.id} className={`entry-card ${entry.breached?"breached":""}`}>
-          <div className="entry-avatar">{entry.site.replace(/^https?:\/\//,"").charAt(0)}</div>
+      {entries.map(e=>(
+        <div key={e.id} className={`entry-card ${e.breached?"breached":""}`}>
+          <SiteAvatar site={e.site}/>
           <div className="entry-info">
-            <div className="entry-site">
-              {entry.site}
-              {entry.breached&&<span className="badge badge-danger">Breached</span>}
-              {entry.breached===false&&<span className="badge badge-safe">Verified</span>}
+            <div className="entry-site">{e.site}
+              {e.breached&&<span className="badge badge-danger">Breached</span>}
+              {e.breached===false&&<span className="badge badge-safe">Verified</span>}
             </div>
-            <div className="entry-user">{entry.username}</div>
-            {visible[entry.id]&&<div className="entry-pw">{entry.password}</div>}
+            <div className="entry-user">{e.username}</div>
+            {vis[e.id]&&<div className="entry-pw">{e.password}</div>}
           </div>
           <div className="entry-actions">
-            <button className="icon-btn" onClick={()=>onCopy(entry.password,"Password")}><I.Copy/></button>
-            <button className="icon-btn" onClick={()=>onCopy(entry.username,"Username")}><I.User/></button>
-            <button className={`icon-btn ${visible[entry.id]?"active":""}`} onClick={()=>setVisible(v=>({...v,[entry.id]:!v[entry.id]}))}>
-              {visible[entry.id]?<I.EyeOff/>:<I.Eye/>}
+            <button className="icon-btn" onClick={()=>onCopy(e.password,"Password")}><I.Copy/></button>
+            <button className="icon-btn" onClick={()=>onCopy(e.username,"Username")}><I.User/></button>
+            <button className={`icon-btn ${vis[e.id]?"active":""}`} onClick={()=>setVis(v=>({...v,[e.id]:!v[e.id]}))}>
+              {vis[e.id]?<I.EyeOff/>:<I.Eye/>}
             </button>
-            <button className="icon-btn" disabled={checking[entry.id]} style={{opacity:checking[entry.id]?.3:1}} onClick={()=>onCheckBreach(entry)}><I.Shield/></button>
-            <button className="icon-btn danger" onClick={()=>onDelete(entry.id)}><I.Trash/></button>
+            <button className="icon-btn" disabled={checking[e.id]} style={{opacity:checking[e.id]?.3:1}} onClick={()=>onCheckBreach(e)}><I.Shield/></button>
+            <button className="icon-btn danger" onClick={()=>onDelete(e.id)}><I.Trash/></button>
           </div>
         </div>
       ))}
@@ -561,60 +632,66 @@ function EntryList({ entries, onCopy, onDelete, onCheckBreach, checking }: {
 }
 
 // ── VAULT SCREEN ──────────────────────────────────────────────────────────────
-function VaultScreen({ session, onLogout }: { session: SessionState; onLogout: ()=>void }) {
-  const [vault, setVault] = useState(session.vault);
-  const [saving, setSaving] = useState(false);
-  const [showAdd, setShowAdd] = useState(false);
-  const [search, setSearch] = useState("");
-  const [checking, setChecking] = useState<Record<string,boolean>>({});
-  const [toast, setToast] = useState<{msg:string;type:"default"|"ok"|"warn"}|null>(null);
+function VaultScreen({ session, onLogout }:{ session:SessionState; onLogout:()=>void }) {
+  const [vault,setVault]=useState(session.vault);
+  const [folders,setFolders]=useState<Folder[]>((session.vault as any)._folders??[]);
+  const [saving,setSaving]=useState(false);
+  const [showAdd,setShowAdd]=useState(false);
+  const [search,setSearch]=useState("");
+  const [activeFolder,setActiveFolder]=useState<string|null>(null);
+  const [checking,setChecking]=useState<Record<string,boolean>>({});
+  const [toast,setToast]=useState<{msg:string;type:"default"|"ok"|"warn"}|null>(null);
 
-  const showToast = (msg:string, type:"default"|"ok"|"warn"="default") => {
-    setToast({msg,type}); setTimeout(()=>setToast(null),2800);
-  };
+  const showToast=(msg:string,type:"default"|"ok"|"warn"="default")=>{setToast({msg,type});setTimeout(()=>setToast(null),2800);};
 
-  const persist = useCallback(async (updated: VaultData) => {
+  const persist=useCallback(async(entries:VaultEntry[],flds:Folder[])=>{
     setSaving(true);
-    try {
-      const {encryptedVault,vaultIV} = await encryptVault(updated, session.privateKeyB64);
-      await api.saveVault(encryptedVault, vaultIV);
-      setVault(updated);
-    } catch { showToast("Failed to save vault","warn"); }
+    try{
+      const vd={...vault,entries,_folders:flds} as VaultData;
+      const {encryptedVault,vaultIV}=await encryptVault(vd,session.privateKeyB64);
+      await api.saveVault(encryptedVault,vaultIV);
+      setVault(vd);setFolders(flds);
+    }catch{showToast("Failed to save","warn");}
     setSaving(false);
-  }, [session.privateKeyB64]);
+  },[session.privateKeyB64,vault]);
 
-  const copy = async (text:string, label:string) => { await navigator.clipboard.writeText(text); showToast(`${label} copied`,"ok"); };
+  const copy=async(text:string,label:string)=>{await navigator.clipboard.writeText(text);showToast(`${label} copied`,"ok");};
 
-  const handleSave = async (form: Omit<VaultEntry,"id"|"createdAt"|"updatedAt">) => {
-    const entry: VaultEntry = {id:crypto.randomUUID(),...form,createdAt:Date.now(),updatedAt:Date.now()};
-    await persist({...vault,entries:[...vault.entries,entry]});
-    setShowAdd(false); showToast("Entry saved","ok");
+  const handleSave=async(form:Omit<VaultEntry,"id"|"createdAt"|"updatedAt">)=>{
+    const entry:VaultEntry={id:crypto.randomUUID(),...form,createdAt:Date.now(),updatedAt:Date.now()};
+    await persist([...vault.entries,entry],folders);setShowAdd(false);showToast("Entry saved","ok");
+  };
+  const handleDelete=async(id:string)=>{await persist(vault.entries.filter(e=>e.id!==id),folders);showToast("Entry deleted");};
+  const handleAddFolder=async(f:Folder)=>persist(vault.entries,[...folders,f]);
+  const handleDeleteFolder=async(id:string)=>{
+    const entries=vault.entries.map(e=>(e as any).folderId===id?{...e,folderId:""}:e) as VaultEntry[];
+    await persist(entries,folders.filter(f=>f.id!==id));
+    if(activeFolder===id)setActiveFolder(null);
   };
 
-  const handleDelete = async (id:string) => {
-    await persist({...vault,entries:vault.entries.filter(e=>e.id!==id)}); showToast("Entry deleted");
-  };
-
-  const checkBreach = async (entry: VaultEntry) => {
+  const checkBreach=async(entry:VaultEntry)=>{
     setChecking(c=>({...c,[entry.id]:true}));
-    try {
-      const count = await api.checkBreached(entry.password);
-      const updated = vault.entries.map(e=>e.id===entry.id?{...e,breached:count>0}:e);
-      await persist({...vault,entries:updated});
-      if (count>0) showToast(`Found in ${count.toLocaleString()} breaches`,"warn");
-      else showToast("Not found in known breaches","ok");
-    } catch { showToast("Breach check unavailable","warn"); }
+    try{
+      const count=await api.checkBreached(entry.password);
+      const updated=vault.entries.map(e=>e.id===entry.id?{...e,breached:count>0}:e);
+      await persist(updated,folders);
+      showToast(count>0?`Found in ${count.toLocaleString()} breaches`:"Not found in known breaches",count>0?"warn":"ok");
+    }catch{showToast("Breach check unavailable","warn");}
     setChecking(c=>({...c,[entry.id]:false}));
   };
-
-  const checkAllBreaches = async () => {
-    showToast("Checking via HIBP k-Anonymity...");
-    for (const e of vault.entries) { await checkBreach(e); await new Promise(r=>setTimeout(r,400)); }
+  const checkAllBreaches=async()=>{
+    showToast("Checking via HIBP…");
+    for(const e of vault.entries){await checkBreach(e);await new Promise(r=>setTimeout(r,400));}
     showToast("Breach check complete","ok");
   };
 
-  const filtered = vault.entries.filter(e=>!search||e.site.toLowerCase().includes(search.toLowerCase())||e.username.toLowerCase().includes(search.toLowerCase()));
-  const breachedCount = vault.entries.filter(e=>e.breached).length;
+  const filtered=vault.entries.filter(e=>{
+    const ms=!search||e.site.toLowerCase().includes(search.toLowerCase())||e.username.toLowerCase().includes(search.toLowerCase());
+    const mf=activeFolder===null||(e as any).folderId===activeFolder;
+    return ms&&mf;
+  });
+  const activeF=folders.find(f=>f.id===activeFolder);
+  const breachedCount=vault.entries.filter(e=>e.breached).length;
 
   return (
     <div className="screen screen-full">
@@ -625,42 +702,39 @@ function VaultScreen({ session, onLogout }: { session: SessionState; onLogout: (
           <button className="lock-btn" onClick={onLogout}><I.Lock/>Lock Vault</button>
         </div>
       </div>
-
-      {breachedCount>0&&(
-        <div className="alert alert-warn" style={{marginBottom:14}}>
-          <I.Alert/>{breachedCount} password{breachedCount>1?"s":""} found in known data breaches.
-        </div>
-      )}
-
+      {breachedCount>0&&<div className="alert alert-warn" style={{marginBottom:14}}><I.Alert/>{breachedCount} password{breachedCount>1?"s":""} found in known data breaches.</div>}
       <div className="vault-body">
         <div className="sidebar">
           <HealthWidget entries={vault.entries} onCheckAll={checkAllBreaches}/>
+          <FolderPanel folders={folders} entries={vault.entries} active={activeFolder}
+            onSelect={setActiveFolder} onAdd={handleAddFolder} onDelete={handleDeleteFolder}/>
           <div className="sidebar-card">
             <div className="nav-label">Security Standards</div>
-            {["ECDSA P-256 Auth","AES-256-GCM Vault","HIBP k-Anonymity","HKDF Key Derivation"].map(l=>(
-              <div key={l} className="sec-item" style={{marginBottom:7}}><I.Shield/>{l}</div>
+            {["ECDSA P-256","AES-256-GCM","HIBP k-Anon","HKDF Derive"].map(l=>(
+              <div key={l} className="sec-item" style={{marginBottom:6}}><I.Shield/>{l}</div>
             ))}
           </div>
         </div>
-
         <div className="main-panel">
           <div className="card">
             <div className="toolbar">
               <div className="toolbar-left">
-                <div className="panel-title">Credentials</div>
-                <div className="panel-meta">{vault.entries.length} entries · Zero-knowledge</div>
+                <div className="panel-title">
+                  {activeF&&<div style={{width:8,height:8,borderRadius:2,background:activeF.color,flexShrink:0}}/>}
+                  {activeF?activeF.name:"Credentials"}
+                </div>
+                <div className="panel-meta">{filtered.length} entries · Zero-knowledge</div>
               </div>
               <div className="toolbar-right">
-                <div className="search-wrap">
-                  <I.Search/>
-                  <input className="search-inp" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}/>
+                <div className="search-wrap"><I.Search/>
+                  <input className="search-inp" placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)}/>
                 </div>
                 <button className="add-btn" onClick={()=>setShowAdd(s=>!s)}>
                   {showAdd?<><I.X/>Cancel</>:<><I.Plus/>Add Entry</>}
                 </button>
               </div>
             </div>
-            {showAdd&&<AddForm onSave={handleSave} onCancel={()=>setShowAdd(false)} onToast={showToast}/>}
+            {showAdd&&<AddForm onSave={handleSave} onCancel={()=>setShowAdd(false)} onToast={showToast} folders={folders}/>}
             <EntryList entries={filtered} onCopy={copy} onDelete={handleDelete} onCheckBreach={checkBreach} checking={checking}/>
           </div>
         </div>
@@ -671,24 +745,24 @@ function VaultScreen({ session, onLogout }: { session: SessionState; onLogout: (
 }
 
 // ── LANDING ───────────────────────────────────────────────────────────────────
-function LandingScreen({ onCreate, onLogin }: { onCreate:()=>void; onLogin:()=>void }) {
-  const supported = isFileSystemAccessSupported();
+function LandingScreen({ onCreate, onLogin, onRecover }:{ onCreate:()=>void; onLogin:()=>void; onRecover:()=>void }) {
+  const supported=isFileSystemAccessSupported();
   return (
-    <div className="screen">
-      <Wordmark/>
+    <div className="screen"><Wordmark/>
       <div className="card">
         <div className="eyebrow">Secure Credential Storage</div>
         <div className="h1">Your key.<br/>Your vault.</div>
         <div className="body">Authentication via cryptographic key pair on your USB device. No master password. The private key never leaves your hardware.</div>
         {!supported&&<div className="alert alert-warn"><I.Alert/>Requires Chrome or Edge 86+.</div>}
-        <div className="sec-bar">
-          {["ECDSA P-256","AES-256-GCM","Zero-Knowledge","HIBP k-Anon"].map(l=>(
-            <div key={l} className="sec-item"><I.Shield/>{l}</div>
-          ))}
-        </div>
+        <div className="sec-bar">{["ECDSA P-256","AES-256-GCM","Zero-Knowledge","HIBP k-Anon"].map(l=><div key={l} className="sec-item"><I.Shield/>{l}</div>)}</div>
         <div className="btn-row">
           <button className="btn btn-primary" onClick={onCreate} disabled={!supported}><I.Plus/>New Vault</button>
           <button className="btn btn-outline" onClick={onLogin} disabled={!supported} style={{marginTop:0}}><I.Unlock/>Unlock Vault</button>
+        </div>
+        <div style={{display:"flex",justifyContent:"center"}}>
+          <button className="recovery-link" onClick={onRecover} disabled={!supported}>
+            <I.Recover/>Lost your USB? Recover with seed phrase
+          </button>
         </div>
       </div>
     </div>
@@ -696,59 +770,44 @@ function LandingScreen({ onCreate, onLogin }: { onCreate:()=>void; onLogin:()=>v
 }
 
 // ── CREATE ────────────────────────────────────────────────────────────────────
-function CreateScreen({ onBack, onComplete }: { onBack:()=>void; onComplete:(s:SessionState)=>void }) {
-  const [step,setStep]=useState(0);
-  const [status,setStatus]=useState("");
-  const [error,setError]=useState("");
-  const [seed,setSeed]=useState("");
-  const [confirmed,setConfirmed]=useState(false);
-  const [copied,setCopied]=useState(false);
+function CreateScreen({ onBack, onComplete }:{ onBack:()=>void; onComplete:(s:SessionState)=>void }) {
+  const [step,setStep]=useState(0);const [status,setStatus]=useState("");const [error,setError]=useState("");
+  const [seed,setSeed]=useState("");const [confirmed,setConfirmed]=useState(false);const [copied,setCopied]=useState(false);
   const ref=useRef<SessionState|null>(null);
-
-  const handleSetup=async()=>{
-    setError("");setStep(1);
+  const setup=async()=>{setError("");setStep(1);
     try{
       setStatus("Generating ECDSA P-256 key pair");
       const {publicKeyB64,privateKeyB64,publicKeyHash}=await generateKeyPair();
       setStatus("Deriving AES-256 vault key");
-      const vault=emptyVault();
-      const {encryptedVault,vaultIV}=await encryptVault(vault,privateKeyB64);
+      const vault=emptyVault();const {encryptedVault,vaultIV}=await encryptVault(vault,privateKeyB64);
       setStatus("Writing key to USB");
       await setupUSBKey({privateKeyB64,publicKeyB64,publicKeyHash,createdAt:Date.now(),version:1});
       setStatus("Registering with server");
       await api.register({publicKey:publicKeyB64,publicKeyHash,encryptedVault,vaultIV});
-      setSeed(generateSeedPhrase());
-      ref.current={privateKeyB64,publicKeyB64,publicKeyHash,vault};
-      setStep(2);
-    }catch(err:any){setError(err.message??"Setup failed.");setStep(0);}
+      setSeed(generateSeedPhrase());ref.current={privateKeyB64,publicKeyB64,publicKeyHash,vault};setStep(2);
+    }catch(e:any){setError(e.message??"Setup failed.");setStep(0);}
   };
-
   const copySeed=async()=>{await navigator.clipboard.writeText(seed);setCopied(true);setTimeout(()=>setCopied(false),3000);};
-  const handleFinish=()=>{if(!confirmed||!ref.current)return;setStep(3);setTimeout(()=>onComplete(ref.current!),600);};
-
+  const finish=()=>{if(!confirmed||!ref.current)return;setStep(3);setTimeout(()=>onComplete(ref.current!),600);};
   return (
     <div className="screen"><Wordmark/>
       <div className="card">
         <div className="steps">{[0,1,2].map(i=><div key={i} className={`step-bar ${i<step?"done":i===Math.min(step,2)?"active":""}`}/>)}</div>
         {error&&<div className="alert alert-warn"><I.Alert/>{error}</div>}
-        {step===0&&<>
-          <div className="eyebrow">Step 1 of 3</div><div className="h1">Initialize USB key</div>
+        {step===0&&<><div className="eyebrow">Step 1 of 3</div><div className="h1">Initialize USB key</div>
           <div className="body">Select your USB directory. A key file (<code style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--gold)"}}>housekeyvault.hkv</code>) will be written. Your private key never leaves this device.</div>
-          <div className="usb-zone" onClick={handleSetup}><div className="usb-visual"><I.USB/></div><div className="usb-label">Select USB directory</div><div className="usb-hint">Browser will prompt for folder access</div></div>
+          <div className="usb-zone" onClick={setup}><div className="usb-visual"><I.USB/></div><div className="usb-label">Select USB directory</div><div className="usb-hint">Browser will prompt for folder access</div></div>
           <button className="btn btn-ghost" onClick={onBack}>Back</button>
         </>}
-        {step===1&&<>
-          <div className="eyebrow">Initializing</div><div className="h1">Setting up vault</div>
-          <div className="body" style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text3)"}}>{status}...</div>
+        {step===1&&<><div className="eyebrow">Initializing</div><div className="h1">Setting up vault</div>
+          <div className="body" style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text3)"}}>{status}…</div>
           <div className="usb-zone active"><div className="usb-visual"><I.USB/></div><div className="usb-label">Writing to device</div><div className="usb-hint">Do not remove USB</div></div>
         </>}
-        {step===2&&<>
-          <div className="eyebrow">Step 2 of 3</div><div className="h1">Recovery phrase</div>
+        {step===2&&<><div className="eyebrow">Step 2 of 3</div><div className="h1">Recovery phrase</div>
           <div className="body">Store offline. Only way to recover if USB is lost.</div>
           <div className="alert alert-warn"><I.Alert/>Will not be shown again.</div>
           <div className="seed-box">
-            <div className="seed-hdr">
-              <div className="seed-label">12-Word Recovery Phrase</div>
+            <div className="seed-hdr"><div className="seed-label">12-Word Recovery Phrase</div>
               <button className={`seed-copy ${copied?"copied":""}`} onClick={copySeed}>{copied?<I.Check/>:<I.Copy/>}{copied?"Copied":"Copy"}</button>
             </div>
             <div className="seed-grid">{seed.split(" ").map((w,i)=><div key={i} className="seed-word"><span className="seed-idx">{String(i+1).padStart(2,"0")}</span><span className="seed-val">{w}</span></div>)}</div>
@@ -757,49 +816,39 @@ function CreateScreen({ onBack, onComplete }: { onBack:()=>void; onComplete:(s:S
             <input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)} style={{accentColor:"var(--gold)",marginTop:2,flexShrink:0}}/>
             I have stored the recovery phrase safely.
           </label>
-          <button className="btn btn-primary" onClick={handleFinish} disabled={!confirmed}>Enter Vault</button>
+          <button className="btn btn-primary" onClick={finish} disabled={!confirmed}>Enter Vault</button>
         </>}
-        {step===3&&<div className="alert alert-ok"><I.OkCircle/>Vault initialized. Loading...</div>}
+        {step===3&&<div className="alert alert-ok"><I.OkCircle/>Vault initialized. Loading…</div>}
       </div>
     </div>
   );
 }
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────────
-function LoginScreen({ onBack, onSuccess, onParanoia }: { onBack:()=>void; onSuccess:(s:SessionState)=>void; onParanoia:(r:number)=>void }) {
-  const [status,setStatus]=useState<"idle"|"loading"|"error">("idle");
-  const [message,setMessage]=useState("");
-
-  const handleLogin=async()=>{
-    setStatus("loading");setMessage("Select USB directory...");
+function LoginScreen({ onBack, onSuccess, onParanoia }:{ onBack:()=>void; onSuccess:(s:SessionState)=>void; onParanoia:(r:number)=>void }) {
+  const [status,setStatus]=useState<"idle"|"loading"|"error">("idle");const [msg,setMsg]=useState("");
+  const login=async()=>{setStatus("loading");setMsg("Select USB directory…");
     try{
-      const kf=await loadUSBKey();
-      setMessage("Requesting challenge");
-      const {nonce}=await api.getChallenge(kf.publicKeyHash);
-      setMessage("Signing with private key");
-      const sig=await signChallenge(kf.privateKeyB64,nonce);
-      setMessage("Verifying");
+      const kf=await loadUSBKey();setMsg("Requesting challenge");
+      const {nonce}=await api.getChallenge(kf.publicKeyHash);setMsg("Signing with private key");
+      const sig=await signChallenge(kf.privateKeyB64,nonce);setMsg("Verifying");
       const res=await api.verify({publicKey:kf.publicKeyB64,publicKeyHash:kf.publicKeyHash,signature:sig,nonce});
       if(res.error==="LOCKED"){onParanoia(res.remaining??300);return;}
       if(!res.success||!res.encryptedVault)throw new Error("Authentication failed.");
-      setMessage("Decrypting vault");
+      setMsg("Decrypting vault");
       const vault=await decryptVault(res.encryptedVault!,res.vaultIV!,kf.privateKeyB64);
       onSuccess({...kf,vault});
-    }catch(err:any){
-      if(err?.data?.remaining){onParanoia(err.data.remaining);return;}
-      setStatus("error");setMessage(err.message??"Authentication failed.");
-    }
+    }catch(e:any){if(e?.data?.remaining){onParanoia(e.data.remaining);return;}setStatus("error");setMsg(e.message??"Auth failed.");}
   };
-
   return (
     <div className="screen"><Wordmark/>
       <div className="card">
         <div className="eyebrow">Authentication</div><div className="h1">Insert key to unlock</div>
         <div className="body">Select the directory with your <code style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--gold)"}}>housekeyvault.hkv</code> file.</div>
-        {status==="error"&&<div className="alert alert-warn"><I.Alert/>{message}</div>}
-        <div className={`usb-zone ${status==="loading"?"active":""}`} onClick={status!=="loading"?handleLogin:undefined}>
+        {status==="error"&&<div className="alert alert-warn"><I.Alert/>{msg}</div>}
+        <div className={`usb-zone ${status==="loading"?"active":""}`} onClick={status!=="loading"?login:undefined}>
           <div className="usb-visual">{status==="loading"?<I.Lock/>:<I.Key/>}</div>
-          <div className="usb-label">{status==="loading"?message:"Click to authenticate"}</div>
+          <div className="usb-label">{status==="loading"?msg:"Click to authenticate"}</div>
           <div className="usb-hint">{status==="idle"?"ECDSA P-256 challenge-response":""}</div>
         </div>
         <button className="btn btn-ghost" onClick={onBack}>Back</button>
@@ -808,22 +857,99 @@ function LoginScreen({ onBack, onSuccess, onParanoia }: { onBack:()=>void; onSuc
   );
 }
 
+// ── RECOVER SCREEN ────────────────────────────────────────────────────────────
+function RecoverScreen({ onBack, onSuccess }:{ onBack:()=>void; onSuccess:(s:SessionState)=>void }) {
+  // Individual word refs for auto-advance on space/enter
+  const inputRefs = useRef<(HTMLInputElement|null)[]>([]);
+  const [words,setWords]=useState<string[]>(Array(12).fill(""));
+  const [status,setStatus]=useState<"idle"|"loading"|"error">("idle");
+  const [error,setError]=useState("");
+
+  const setWord=(i:number,v:string)=>{
+    // auto-advance on space
+    if (v.endsWith(" ")) { inputRefs.current[i+1]?.focus(); v=v.trim(); }
+    const w=[...words]; w[i]=v.toLowerCase(); setWords(w);
+  };
+
+  const filled=words.filter(w=>w.length>0).length;
+  const allFilled=words.every(w=>w.length>0);
+
+  const handleRecover=async()=>{
+    if(!allFilled){setError("Please fill all 12 words.");return;}
+    setStatus("loading");setError("");
+    try{
+      const seed=words.join(" ");
+      const result=await api.recover(seed);
+      if(!result.success||!result.encryptedVault)throw new Error(result.error??"Recovery failed.");
+      const {publicKeyB64,privateKeyB64,publicKeyHash}=await generateKeyPair();
+      const vault=await decryptVault(result.encryptedVault,result.vaultIV!,result.recoveryKey!);
+      const {encryptedVault:newEnc,vaultIV:newIV}=await encryptVault(vault,privateKeyB64);
+      await api.saveVault(newEnc,newIV);
+      await setupUSBKey({privateKeyB64,publicKeyB64,publicKeyHash,createdAt:Date.now(),version:1});
+      onSuccess({privateKeyB64,publicKeyB64,publicKeyHash,vault});
+    }catch(e:any){setStatus("error");setError(e.message??"Recovery failed.");}
+  };
+
+  return (
+    <div className="screen"><Wordmark/>
+      <div className="card">
+        <div className="eyebrow">Vault Recovery</div>
+        <div className="h1">Recover with seed</div>
+        <div className="body" style={{marginBottom:10}}>
+          Enter your 12-word recovery phrase in order. This will restore your vault and write a new key to a USB device.
+        </div>
+        <div className="alert alert-warn" style={{marginBottom:0}}>
+          <I.Alert/>HouseKey never stores your phrase — only you have it.
+        </div>
+
+        <div className="seed-input-grid">
+          {words.map((w,i)=>(
+            <div key={i} className={`si ${status==="error"&&!w?"err":""}`}>
+              <span className="si-num">{String(i+1).padStart(2,"0")}</span>
+              <input
+                ref={el=>{inputRefs.current[i]=el;}}
+                className="si-inp"
+                placeholder="word"
+                value={w}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                onChange={e=>setWord(i,e.target.value)}
+                onKeyDown={e=>{
+                  if(e.key==="Enter"||e.key===" "){e.preventDefault();inputRefs.current[i+1]?.focus();}
+                  if(e.key==="Backspace"&&!w)inputRefs.current[i-1]?.focus();
+                }}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text3)",letterSpacing:".08em",marginBottom:12}}>
+          {filled} / 12 words entered
+        </div>
+
+        {error&&<div className="alert alert-warn" style={{marginBottom:12}}><I.Alert/>{error}</div>}
+
+        <button className="btn btn-primary" onClick={handleRecover} disabled={!allFilled||status==="loading"}>
+          <I.Recover/>{status==="loading"?"Recovering…":"Restore Vault"}
+        </button>
+        <button className="btn btn-ghost" onClick={onBack}>Back</button>
+      </div>
+    </div>
+  );
+}
+
 // ── PARANOIA ──────────────────────────────────────────────────────────────────
-function ParanoiaScreen({ remaining, onRetry }: { remaining:number; onRetry:()=>void }) {
+function ParanoiaScreen({ remaining, onRetry }:{ remaining:number; onRetry:()=>void }) {
   const [count,setCount]=useState(remaining);
-  useEffect(()=>{
-    if(count<=0)return;
-    const t=setInterval(()=>setCount(c=>c-1),1000);
-    return ()=>clearInterval(t);
-  },[]);
-  const mm=String(Math.floor(count/60)).padStart(2,"0");
-  const ss=String(count%60).padStart(2,"0");
+  useEffect(()=>{if(count<=0)return;const t=setInterval(()=>setCount(c=>c-1),1000);return()=>clearInterval(t);},[]);
+  const mm=String(Math.floor(count/60)).padStart(2,"0"),ss=String(count%60).padStart(2,"0");
   return (
     <div className="screen"><Wordmark/>
       <div className="card" style={{background:"rgba(12,6,6,0.9)",borderColor:"rgba(192,57,43,0.2)",textAlign:"center"}}>
         <div className="p-icon"><I.Lock/></div>
         <div className="p-title">Access Suspended</div>
-        <div className="p-sub">Multiple failed attempts detected. Access temporarily suspended.</div>
+        <div className="p-sub">Multiple failed attempts detected.</div>
         <div className="countdown">{mm}:{ss}</div>
         <div className="countdown-label">Time remaining</div>
         {count<=0&&<button className="btn btn-outline" onClick={onRetry} style={{marginTop:24}}>Retry Authentication</button>}
@@ -837,16 +963,18 @@ export default function App() {
   const [screen,setScreen]=useState<Screen>("landing");
   const [session,setSession]=useState<SessionState|null>(null);
   const [paranoia,setParanoia]=useState(0);
-  const handleLogout=async()=>{await api.logout().catch(()=>{});setSession(null);setScreen("landing");};
+  const logout=async()=>{await api.logout().catch(()=>{});setSession(null);setScreen("landing");};
+  const enter=(s:SessionState)=>{setSession(s);setScreen("vault");};
   return (
     <>
       <style>{CSS}</style>
       <div className={`app ${screen==="paranoia"?"paranoia-bg":""}`}>
-        {screen==="landing"&&<LandingScreen onCreate={()=>setScreen("create")} onLogin={()=>setScreen("login")}/>}
-        {screen==="create"&&<CreateScreen onBack={()=>setScreen("landing")} onComplete={s=>{setSession(s);setScreen("vault");}}/>}
-        {screen==="login"&&<LoginScreen onBack={()=>setScreen("landing")} onSuccess={s=>{setSession(s);setScreen("vault");}} onParanoia={r=>{setParanoia(r);setScreen("paranoia");}}/>}
-        {screen==="vault"&&session&&<VaultScreen session={session} onLogout={handleLogout}/>}
-        {screen==="paranoia"&&<ParanoiaScreen remaining={paranoia} onRetry={()=>setScreen("login")}/>}
+        {screen==="landing"  && <LandingScreen onCreate={()=>setScreen("create")} onLogin={()=>setScreen("login")} onRecover={()=>setScreen("recover")}/>}
+        {screen==="create"   && <CreateScreen  onBack={()=>setScreen("landing")} onComplete={enter}/>}
+        {screen==="login"    && <LoginScreen   onBack={()=>setScreen("landing")} onSuccess={enter} onParanoia={r=>{setParanoia(r);setScreen("paranoia");}}/>}
+        {screen==="recover"  && <RecoverScreen onBack={()=>setScreen("landing")} onSuccess={enter}/>}
+        {screen==="vault"    && session && <VaultScreen session={session} onLogout={logout}/>}
+        {screen==="paranoia" && <ParanoiaScreen remaining={paranoia} onRetry={()=>setScreen("login")}/>}
       </div>
     </>
   );
